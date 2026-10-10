@@ -4,7 +4,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY tsconfig.json cli.ts server.ts container.ts ./
 COPY src ./src
-COPY scripts/bundle.mjs ./scripts/bundle.mjs
+COPY scripts/bundle.mjs scripts/redoc-assets.mjs ./scripts/
+COPY assets ./assets
 RUN npm run check && npm run bundle
 
 FROM node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a

@@ -31,7 +31,7 @@ sudo ln -s /opt/paseo-bridge/paseo-bridge-server.mjs /usr/local/bin/paseo-bridge
 paseo-bridge --help
 ```
 
-Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.1.0.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24; it does not publish to npm.
+Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.2.0.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24; it does not publish to npm.
 
 ## Use
 
@@ -44,16 +44,27 @@ paseo-bridge --profile central agents --host aspen
 paseo-bridge --profile central send --host aspen --agent AGENT_ID --prompt-file /path/to/prompt.txt
 paseo-bridge --profile central activity --host aspen --agent AGENT_ID --tail 20
 paseo-bridge --profile central wait --host aspen --agent AGENT_ID --timeout 120
+# Explicit compatibility mode for clients/environments without streaming:
+paseo-bridge --profile central wait --host aspen --agent AGENT_ID --timeout 120 --wait-mode poll
 ```
 
 Output is always JSON (`--json` is accepted). Queries return per-host results, timestamps, and an explicit `partial` flag. Exit codes: `0` successful/accepted, `1` invalid request or error, `2` partial results, unknown send outcome, or wait timeout. A completed agent can have `result.status: "error"`; inspect the result, not just the exit code.
 
 - `all` is query-only. Sending/activity/wait require explicit host and agent ID, never name matching.
 - Busy sends are rejected. `--interrupt` is an explicit opt-in and may interrupt the target's current turn.
-- An accepted send is **not** a completed turn. Use `wait` followed by `activity`.
+- An accepted send is **not** a completed turn. Use `wait` followed by `activity`. `wait` defaults to read-only SSE observation and reconnects within its original deadline; use explicit `--wait-mode poll` for snapshot polling. No authentication/business error silently switches modes, and observation recovery never repeats a send.
+- State observation keeps `result.lastMessage` null; activity permission is required to read replies. Idle is not proof of completion of a particular uncertain send.
 - Unknown send outcomes are never retried automatically. Unresolved submissions are durably guarded across restarts; another send requires operator reconciliation and local clearance unless the original SDK request later confirms acceptance.
 - Paseo 0.11.1 cannot atomically enforce idle-only delivery across other clients. A concurrent external turn may receive the default send as `steer`, not as an interrupt.
 - No autonomous forwarding, agent creation/deletion, terminal execution, workspace mutation, or recursive conversations.
+
+## REST API and application-owned documentation
+
+Version 0.2 replaces the old `/v1/request` endpoint; update the service and CLI together. The same TypeScript CLI uses `/api/v1` REST routes over either Unix sockets or HTTPS. Sends use a dedicated messages POST; discovery, snapshots and activity use GET. SSE is recommended for ongoing observation, while ordinary snapshot/activity polling remains supported. See the [route and scope contract](docs/security.md#requestresponse-contract).
+
+The service anonymously serves generated OpenAPI 3.1 at `/api/v1/openapi.json` and Redoc at `/api/v1/openapi`, with self-hosted script/license assets under `/api/v1/openapi/assets/`. Shared route definitions and Zod schemas drive both runtime validation and generation, including concrete SDK agent, workspace, timeline and event outputs. `npm run openapi` also generates `build/openapi.json` for other-language client tooling. Documentation is application-owned, never derived by the proxy, and contains no runtime secrets or host inventory. Redoc and its licenses are included in npm and standalone/container distributions; no CDN or runtime npm installation is needed.
+
+SSE has heartbeats, bounded lifetime/buffering/processing, authorization rechecks and subscription cleanup. Reconnect sends a fresh snapshot and resync, **not durable event replay**; refetch authorized activity to reconcile missing history. Browser clients must use fetch streaming with an Authorization header, never a token in a URL.
 
 ## Administration and security
 
@@ -84,9 +95,10 @@ npm run check
 npm test
 npm audit --omit=dev
 npm run bundle
+npm run openapi
 node scripts/verify-package.mjs
 # Optional, read-only real local daemon test (never sends prompts):
 PASEO_TEST_LOCAL_CREDENTIAL=/absolute/path/to/local-credential npm test
 ```
 
-Tests exercise SDK WebSocket connections and official Relay E2EE channels, protected pairing import/persisted verification, daemon restart/reconnect, persistent identity, reload/shutdown races, Unix sockets, HTTPS trust, authentication/revocation/scopes, client-capacity isolation, pagination/partial failure, send busy/uncertain behavior and durable quarantine/reconciliation, CLI profiles and packaging. HTTPS tests use a generated local certificate and require `openssl`. Live ASPEN Relay acceptance and public HTTPS deployment need operator-supplied pairing files/domain; passing local tests does not assert those deployments have happened.
+Tests exercise SDK WebSocket connections and official Relay E2EE channels, protected pairing import/persisted verification, daemon restart/reconnect, persistent identity, reload/shutdown races, Unix sockets, HTTPS trust, authentication/revocation/scopes, client-capacity isolation, pagination/partial failure, send busy/uncertain behavior and durable quarantine/reconciliation, CLI profiles, generated concrete OpenAPI, anonymous bundled documentation, SSE/poll deadlines, scopes/live revocation/stream cleanup and packaging. HTTPS tests use a generated local certificate and require `openssl`. Live ASPEN Relay acceptance and public HTTPS deployment need operator-supplied pairing files/domain; passing local tests does not assert those deployments have happened.

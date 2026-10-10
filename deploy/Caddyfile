@@ -5,13 +5,14 @@ bridge.example.com {
         max_size 256KB
     }
     @api {
-        method POST
-        path /v1/request
+        method GET POST
+        path /api/v1/*
     }
     handle @api {
         reverse_proxy 127.0.0.1:8787 {
+            flush_interval -1
             transport http {
-                response_header_timeout 610s
+                response_header_timeout 135s
             }
         }
     }

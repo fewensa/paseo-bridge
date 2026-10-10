@@ -55,7 +55,7 @@ test('activity tail zero and wait', async () => {
   const zero = await service.execute(request({ op: 'activity', host: 'birch', agent: 'agent-1', tail: 0 })) as any;
   assert.deepEqual(zero.entries, []);
   const activity = await service.execute(request({ op: 'activity', host: 'birch', agent: 'agent-1' })) as any;
-  assert.equal(activity.timeline.entries[0].text, 'received');
+  assert.equal(activity.timeline.entries[0].item.text, 'received');
   const waited = await service.execute(request({ op: 'wait', host: 'birch', agent: 'agent-1' })) as any;
   assert.equal(waited.result.lastMessage, 'received');
 });

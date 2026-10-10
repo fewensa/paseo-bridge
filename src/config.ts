@@ -8,6 +8,7 @@ import { BridgeError } from './errors.js';
 const path = z.string().refine(isAbsolute, 'Absolute path required');
 export const hostName = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/).refine(x => x !== 'all');
 export const operations = ['status', 'agents', 'workspaces', 'send', 'activity', 'wait'] as const;
+export type Operation = typeof operations[number];
 export const serverSchema = z.object({
   version: z.literal(1),
   hosts: z.record(hostName, z.object({ connectionFile: path }).strict()).refine(x => Object.keys(x).length > 0),
