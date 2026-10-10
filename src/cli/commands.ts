@@ -14,7 +14,7 @@ const help = `paseo-bridge [--config FILE] [--profile NAME] COMMAND [OPTIONS]
 Queries: status | agents | workspaces [--host NAME|all]
 Actions: send --host NAME --agent ID --prompt-file FILE [--interrupt]
          activity --host NAME --agent ID [--tail 20]
-         wait --host NAME --agent ID [--timeout 120]
+         wait --host NAME --agent ID [--timeout 120] [--wait-mode sse|poll]
 All commands print JSON. Send never waits or retries. Partial results exit 2.
 
 Local administration (use --config SERVER.json):
@@ -31,11 +31,13 @@ export async function cliMain(args = process.argv.slice(2)): Promise<void> {
   try {
     const { values, positionals } = parseArgs({ args, allowPositionals: true, strict: true, options: {
       config: { type: 'string' }, profile: { type: 'string' }, host: { type: 'string' }, agent: { type: 'string' },
-      'prompt-file': { type: 'string' }, interrupt: { type: 'boolean' }, tail: { type: 'string' }, timeout: { type: 'string' },
+      'prompt-file': { type: 'string' }, interrupt: { type: 'boolean' }, tail: { type: 'string' }, timeout: { type: 'string' }, 'wait-mode': { type: 'string' },
       'pair-file': { type: 'string' }, 'password-file': { type: 'string' }, hosts: { type: 'string' },
       operations: { type: 'string' }, 'token-file': { type: 'string' }, 'request-id': { type: 'string' }, 'confirm-reconciled': { type: 'boolean' }, help: { type: 'boolean', short: 'h' }, json: { type: 'boolean' }
     } });
     if (values.help || !positionals.length) { console.log(help); return; }
+    if (values['wait-mode'] !== undefined && (positionals[0] !== 'wait' || !['sse', 'poll'].includes(values['wait-mode'])))
+      throw new BridgeError('USAGE', '--wait-mode sse|poll is only valid with wait');
     let result: any;
     if (positionals[0] === 'admin') {
       if (positionals.length !== 3 || !values.config) throw new BridgeError('USAGE', 'Admin requires --config, action and name');
@@ -59,7 +61,7 @@ export async function cliMain(args = process.argv.slice(2)): Promise<void> {
       if (!parsed.success) throw new BridgeError('USAGE', 'Invalid arguments; use --help');
       const file = values.config ?? process.env.PASEO_BRIDGE_CONFIG ?? join(homedir(), '.config/paseo-bridge/client.json');
       const config = await readConfig(file, clientSchema);
-      result = await call(config, values.profile, parsed.data);
+      result = await call(config, values.profile, parsed.data, { waitMode: values['wait-mode'] as 'sse' | 'poll' | undefined });
     }
     console.log(JSON.stringify(result, null, 2));
     if (result?.partial || result?.status === 'unknown' || result?.result?.status === 'timeout') process.exitCode = 2;

@@ -14,32 +14,37 @@ Credentials, tokens and persisted client IDs must be owned by the reading user a
 
 No command accepts a pair URL, password or token as an argument. Import input is retained for operator-controlled deletion after persistent verification. A prompt is supplied with `--prompt-file`, keeping content out of process arguments too. Do not run CLI/admin commands under shell tracing that prints file contents, or enable proxy body/Authorization logging.
 
-Central credentials authorize named operations on named hosts. They do **not** limit agents within a permitted host. A client may query/send to any qualifying agent on that host. This is intentionally explicit and suitable only when that host-wide trust is acceptable. Tokens are revoked per client ID; active requests retain the grant received at admission.
+Central credentials authorize named operations on named hosts. They do **not** limit agents within a permitted host. A client may query/send to any qualifying agent on that host. This is intentionally explicit and suitable only when that host-wide trust is acceptable. Tokens are revoked per client ID. Ordinary requests retain the grant received at admission; SSE streams recheck the protected registry during refresh, before activity delivery and on heartbeats, and terminate when authorization or configuration becomes unavailable.
 
 ## Request/response contract
 
-POST `/v1/request`, `Content-Type: application/json`. Central requests require `Authorization: Bearer <token>`. Success: `{ "ok": true, "data": ... }`. Errors: `{ "ok": false, "error": { "code": ..., "message": ... } }`. CLI prints `data` on stdout, error JSON on stderr. `/health` and all administrative/destructive endpoints do not exist.
+Version 0.2 replaces the removed `/v1/request` protocol with separate REST routes. Update the CLI and service together. Both Unix-socket and central HTTPS modes use these paths; only central business routes require `Authorization: Bearer <token>`. JSON success: `{ "ok": true, "data": ... }`. Errors: `{ "ok": false, "error": { "code": ..., "message": ... } }`. CLI prints `data` on stdout and error JSON on stderr. `/health` and all administrative/destructive endpoints do not exist.
 
-```json
-{"op":"agents","host":"all"}
-```
-
-Operations:
-
-| op | fields | result |
+| Method and path | Scope | Result |
 | --- | --- | --- |
-| status | host (name/all) | per-host connection state + fetchedAt |
-| agents | host (name/all) | paginated snapshots, host labels, partial errors |
-| workspaces | host (name/all) | paginated workspace descriptors, partial errors |
-| send | explicit host, agent ID, prompt, optional interrupt | accepted or unknown, message requestId |
-| activity | explicit host, agent ID, optional tail 0–200 | a fresh timeline page; tail 0 gives empty entries |
-| wait | explicit host, agent ID, optional timeout 1–600 seconds | official SDK completion result or timeout |
+| GET `/api/v1/hosts` | status | authorized host connection states |
+| GET `/api/v1/hosts/{host}` | status | one host connection state |
+| GET `/api/v1/agents?host=all` | agents | snapshots, host labels and partial errors |
+| GET `/api/v1/workspaces?host=all` | workspaces | normalized descriptors and partial errors |
+| POST `/api/v1/hosts/{host}/agents/{agent}/messages` | send | 202 accepted or 200 unknown; requestId |
+| GET `/api/v1/hosts/{host}/agents/{agent}` | wait | fresh agent snapshot and optional terminal result |
+| GET `/api/v1/hosts/{host}/agents/{agent}/activity?tail=20` | activity | bounded fresh timeline page; tail=0 gives empty entries |
+| GET `/api/v1/hosts/{host}/agents/{agent}/events` | wait | recommended state SSE observation |
+| GET `/api/v1/hosts/{host}/agents/{agent}/events?include=activity` | wait + activity | state and timeline SSE observation |
 
-Requests reject unknown fields/invalid limits. Query defaults use `host: all` in the CLI; the API requires `host`. IDs are passed exactly—there is no fuzzy agent/name lookup. Archived/nonexistent targets are rejected. `wait` on an idle agent returns immediately; it is not a promise that a new turn will start, and is not correlated to a particular send. Another external turn could begin before a wait is observed.
+The send body is only `{ "prompt": "...", "interrupt": false }`, with JSON Content-Type. There is no HTTP `op` envelope. Unknown fields, duplicate/unknown queries, invalid paths and invalid limits are rejected. Agent IDs and explicit hosts are exact; no fuzzy matching or broadcasting. List queries default to `host=all`; explicit targets cannot use `all`. Archived/nonexistent targets are rejected. `wait` on an idle agent may finish immediately; it does not bind to a particular send or promise that a new turn will start. Another external turn could begin before observation. Snapshot/wait results keep `lastMessage: null` so wait permission cannot disclose timeline text; read replies through authorized `activity` queries.
+
+OpenAPI 3.1 is automatically generated from the same route metadata and Zod request/response schemas used at runtime, including normalized pinned SDK outputs. GET `/api/v1/openapi.json` serves the contract and GET `/api/v1/openapi` serves Redoc with fixed, application-bundled assets under `/api/v1/openapi/assets/`. These document routes are anonymous, static, no-store and contain no runtime hosts, identities, credentials or internal paths. No proxy-generated contract, CDN, Redocly service or third-party font download is required. Browser consumers use fetch streaming with bearer headers: native EventSource cannot set arbitrary Authorization headers, and query-string tokens are forbidden.
+
+### Observation and recovery
+
+Prefer SSE for ongoing observation. CLI `wait` defaults to SSE; `--wait-mode poll` explicitly selects ordinary snapshot polling about every 2 seconds. Both enforce a total 1–600-second deadline across reconnects, and neither retries a send or silently falls back on authentication/business errors. Snapshot and activity endpoints remain immediately usable by other clients without SSE; poll at least 2 seconds apart, back off on transient failures and honor rate limits.
+
+SSE emits named JSON events (`snapshot`, `connection`, `resync`, `error`; plus `activity` and `update` when opted in and authorized). Each connection starts with a fresh snapshot, has comment heartbeats every 10 seconds and rotates within 60 seconds. Observation-only reconnection never cancels work or repeats a prompt. There is **no durable replay guarantee**: Last-Event-ID triggers resync, not historical replay. SDK reconnect, epoch replacement and restored subscriptions may miss timeline history. Refetch activity and inspect epoch/gap/reset/staleCursor before assuming continuity. Post-header failures use an error event and close the stream; disconnected/reconnecting is not a terminal agent outcome.
 
 Queries independently isolate offline/failing hosts. `partial: true` preserves successful host results and labels failures with sanitized error codes. A status query itself can succeed while showing offline hosts; callers must inspect their states. There is no stale cached result masquerading as fresh data.
 
-Limits: request body 256 KiB, prompt 65536 characters, 64 active requests/listener, 8 active requests/authenticated client, at most 32 long waits/listener (reserving capacity for short operations), 60 authenticated requests/minute/client, and 600 failed-auth responses/minute/source before failures become 429. Successful authentication is never rejected by the failed-source bucket, so invalid-token floods through a shared localhost proxy cannot consume valid clients' quota. Forwarded headers are not trusted to spoof IPs. This is not a substitute for network/proxy-level denial-of-service protection. Disconnecting does not let a client evade outstanding-operation accounting. Rate windows reset on restart. Headers/body have bounded receive time. Waits are bounded to 600 seconds. Queries/actions use one shared deadline across pagination and agent refresh/submission. Query collection is capped at 10000 aggregate entries/12 MiB across selected hosts; exceeding that budget returns explicit per-host RESULT_LIMIT failures. Server and CLI responses are capped at 16 MiB. Repeated pagination cursors and excessive page counts fail explicitly.
+Limits: request body 256 KiB, prompt 65536 characters, 64 active requests/listener, 8 active requests/authenticated client, at most 32 SSE streams/listener (reserving capacity for short operations), 60 authenticated requests/minute/client, and 600 failed-auth responses/minute/source before failures become 429. Successful authentication is never rejected by the failed-source bucket, so invalid-token floods through a shared localhost proxy cannot consume valid clients' quota. Forwarded headers are not trusted to spoof IPs. This is not a substitute for network/proxy-level denial-of-service protection. Disconnecting does not let a client evade outstanding-operation accounting. Rate windows reset on restart. Headers/body have bounded receive time. Client waits are bounded to 600 seconds across stream reconnects or explicit polling. Stream frames are capped at 1 MiB, output buffering at 2 MiB and pending processing tasks at 32 per stream; slow/excessive observers are closed. Subscriptions, listeners and timers are cleaned up, including late subscription establishment. Anonymous documentation has a separate 120-request/minute/source bucket and does not consume authenticated business quota. Queries/actions use one shared deadline across pagination and agent refresh/submission. Query collection is capped at 10000 aggregate entries/12 MiB across selected hosts; exceeding that budget returns explicit per-host RESULT_LIMIT failures. Server and CLI responses are capped at 16 MiB. Repeated pagination cursors and excessive page counts fail explicitly.
 
 ## Delivery and busy behavior
 

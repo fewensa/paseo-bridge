@@ -4,6 +4,7 @@ import { operations, hostName } from './config.js';
 import type { Connection } from './paseo/connection.js';
 import { BridgeError, deadline, publicError } from './errors.js';
 import { SubmissionGuards } from './submissions.js';
+import type { Snapshot } from './api/models.js';
 
 export const requestSchema = z.object({
   op: z.enum(operations), host: z.union([hostName, z.literal('all')]),
@@ -117,6 +118,30 @@ export class BridgeService {
         finally { this.sending.delete(key); }
       }
     }
+  }
+  async snapshot(request: Request, allowed?: ReadonlySet<string>): Promise<Snapshot> {
+    if (!request.agent || request.host === 'all') throw new BridgeError('TARGET', 'Explicit host and agent required');
+    if (allowed && !allowed.has(request.host)) throw new BridgeError('FORBIDDEN', 'Host not permitted', 403);
+    const connection = this.hosts.get(request.host);
+    if (!connection) throw new BridgeError('HOST', 'Unknown host', 404);
+    this.online(connection);
+    const handle = connection.api.agents.ref(request.agent);
+    const expires = Date.now() + this.timeoutMs;
+    const value = await deadline(handle.refresh(), this.timeoutMs);
+    if (!value || value.agent.archivedAt) throw new BridgeError('AGENT', 'Agent not found or archived', 404);
+    const snapshot: Snapshot = { host: request.host, agentId: request.agent,
+      fetchedAt: new Date().toISOString(), agent: value.agent };
+    // Read-only, bounded reconciliation with the SDK's existing terminal result.
+    // A new turn racing this refresh can yield timeout; that is not completion.
+    if (value.agent.status === 'idle' || value.agent.status === 'error' || value.agent.pendingPermissions.length) {
+      const remaining = expires - Date.now();
+      if (remaining > 0) {
+        const result = await deadline(handle.waitForFinish(Math.min(1000, remaining)), remaining);
+        // State observation must not smuggle timeline text through wait scope.
+        if (result.status !== 'timeout') snapshot.result = { ...result, lastMessage: null };
+      }
+    }
+    return snapshot;
   }
   private online(connection: Connection) {
     if (connection.state() !== 'connected') throw new BridgeError('OFFLINE', 'Host is not connected', 503);

@@ -10,3 +10,6 @@
 !src/**
 !scripts
 !scripts/bundle.mjs
+!scripts/redoc-assets.mjs
+!assets
+!assets/redoc-logo.svg

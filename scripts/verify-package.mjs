@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import http from 'node:http';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { promisify } from 'node:util';
@@ -55,7 +56,24 @@ try {
       assert(connected, `${distribution} server did not connect`);
       const output = await exec(executable('paseo-bridge'), ['--config', client, 'workspaces', '--host', 'all'], { cwd: isolated });
       assert.equal(JSON.parse(output.stdout).partial, false);
+      for (const [path, check] of [
+        ['/api/v1/openapi.json', text => JSON.parse(text).openapi === '3.1.0'],
+        ['/api/v1/openapi', text => text.includes('redoc.standalone.js')],
+        ['/api/v1/openapi/assets/redoc.standalone.js', text => text.length > 1000000],
+        ['/api/v1/openapi/assets/redoc.licenses.txt', text => text.includes('MIT')]
+      ]) {
+        const text = await new Promise((resolve, reject) => {
+          const req = http.get({ socketPath: socket, path }, res => {
+            if (res.statusCode !== 200) { res.resume(); reject(new Error(`Document response ${res.statusCode}`)); return; }
+            let size = 0; const chunks = [];
+            res.on('data', chunk => { size += chunk.length; if (size > 2 * 1024 * 1024) { reject(new Error('Document too large')); req.destroy(); } else chunks.push(chunk); });
+            res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8'))); res.on('error', reject);
+          });
+          req.setTimeout(3000, () => req.destroy(new Error('Document deadline'))); req.on('error', reject);
+        });
+        assert(check(text), `${distribution} document ${path} missing`);
+      }
     } finally { server.kill('SIGTERM'); await exited; }
   }
 } finally { for (const client of daemon.clients) client.terminate(); await new Promise(resolve => daemon.close(resolve)); }
-console.log('npm-installed and isolated standalone commands verified, including resident server startup, SDK queries and shutdown.');
+console.log('npm-installed and isolated standalone commands verified, including resident server startup, SDK queries, anonymous OpenAPI/Redoc/script/license assets and shutdown.');
