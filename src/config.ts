@@ -47,8 +47,22 @@ export async function readConfig<T>(file: string, schema: z.ZodType<T>): Promise
   try { return schema.parse(JSON.parse(await readFile(file, 'utf8'))); }
   catch { throw new BridgeError('CONFIG', 'Invalid or unreadable configuration'); }
 }
+export async function durableDirectory(directory: string): Promise<void> {
+  const parent = dirname(directory);
+  try { await mkdir(directory, { mode: 0o700 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && parent !== directory) {
+      await durableDirectory(parent);
+      try { await mkdir(directory, { mode: 0o700 }); }
+      catch (retry) { if ((retry as NodeJS.ErrnoException).code !== 'EEXIST') throw retry; }
+    } else if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  // Persist each newly provisioned ancestor's entry, not only the final file.
+  const handle = await open(parent, constants.O_RDONLY);
+  try { await handle.sync(); } finally { await handle.close(); }
+}
 export async function atomicSecret(file: string, value: string): Promise<void> {
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+  await durableDirectory(dirname(file));
   const temp = `${file}.${randomUUID()}.tmp`;
   const handle = await open(temp, 'wx', 0o600);
   try { await handle.writeFile(value); await handle.sync(); }

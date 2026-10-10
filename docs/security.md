@@ -10,7 +10,7 @@
 
 ## Secret handling
 
-Credentials, tokens and persisted client IDs must be owned by the reading user and not readable/writable/executable by group/other (normally 600). They must be regular files; `O_NOFOLLOW` and descriptor-based permission checks reject symlinks and path-swap races. Protected directories should be 700. Writes use exclusive mode-600 temporary files, file sync, atomic rename and parent-directory sync. Server/client configurations contain paths, not secret values. SDK logs are silenced; unknown errors are replaced by a generic public error. The Bridge does not log prompts, pairing URLs, credentials or tokens.
+Credentials, tokens and persisted client IDs must be owned by the reading user and not readable/writable/executable by group/other (normally 600). They must be regular files; `O_NOFOLLOW` and descriptor-based permission checks reject symlinks and path-swap races. Protected directories should be 700. Writes use exclusive mode-600 temporary files, file sync, atomic rename and parent-directory sync, including each ancestor entry provisioned during first-time directory creation. Server/client configurations contain paths, not secret values. SDK logs are silenced; unknown errors are replaced by a generic public error. The Bridge does not log prompts, pairing URLs, credentials or tokens.
 
 No command accepts a pair URL, password or token as an argument. Import input is retained for operator-controlled deletion after persistent verification. A prompt is supplied with `--prompt-file`, keeping content out of process arguments too. Do not run CLI/admin commands under shell tracing that prints file contents, or enable proxy body/Authorization logging.
 

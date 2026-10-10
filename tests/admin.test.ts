@@ -14,6 +14,11 @@ test('secret permissions and atomic replacement', async () => {
   await atomicSecret(file, 'two'); assert.equal(await secretFile(file), 'two');
   await chmod(file, 0o644); await assert.rejects(secretFile(file), { code: 'SECRET_PERMISSIONS' });
 });
+test('atomic persistence durably provisions missing ancestor directories', async () => {
+  const dir = await directory(); const file = join(dir, 'first', 'second', 'secret');
+  await atomicSecret(file, 'one'); assert.equal(await secretFile(file), 'one');
+  await atomicSecret(file, 'two'); assert.equal(await secretFile(file), 'two');
+});
 test('secret symlinks rejected', async () => {
   const dir = await directory(); const file = join(dir, 'secret'); const link = join(dir, 'link');
   await secret(file, 'sensitive'); await symlink(file, link); await assert.rejects(secretFile(link));
