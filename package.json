@@ -1,0 +1,41 @@
+{
+  "name": "paseo-bridge",
+  "version": "0.1.0",
+  "description": "Persistent, authenticated multi-host Paseo bridge",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "paseo-bridge": "dist/cli.js",
+    "paseo-bridge-server": "dist/server.js"
+  },
+  "files": [
+    "dist",
+    "deploy",
+    "examples",
+    "README.md",
+    "docs"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "prepack": "npm run build",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@getpaseo/client": "0.11.1",
+    "@getpaseo/protocol": "0.11.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@getpaseo/relay": "0.11.1",
+    "@types/node": "24.0.0",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3",
+    "ws": "8.22.0"
+  }
+}

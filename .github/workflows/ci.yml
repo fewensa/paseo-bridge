@@ -1,0 +1,30 @@
+name: CI
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - run: npm audit --omit=dev
+      - run: npm run bundle
+      - run: node scripts/verify-package.mjs
+      - run: tar -czf build/paseo-bridge-linux-node.tar.gz -C build paseo-bridge.mjs paseo-bridge-server.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paseo-bridge-node-${{ matrix.node }}
+          path: build/paseo-bridge-linux-node.tar.gz
