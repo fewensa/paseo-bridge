@@ -1,6 +1,8 @@
 # Replace with your own reachable domain. Caddy manages public TLS certificates.
 bridge.example.com {
     # Do not enable request/header logging of Authorization or request bodies.
+    # Preserve self-contained docs: prohibit CDN analytics/HTML injection.
+    header >Cache-Control "no-store, no-transform"
     request_body {
         max_size 256KB
     }

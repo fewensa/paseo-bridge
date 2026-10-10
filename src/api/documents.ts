@@ -24,7 +24,7 @@ export async function serveDocument(req: IncomingMessage, res: ServerResponse): 
     value = await licenses;
   }
   if (!res.destroyed) {
-    res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': csp });
+    res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store, no-transform', 'x-content-type-options': 'nosniff', 'content-security-policy': csp });
     res.end(value);
   }
   return true;

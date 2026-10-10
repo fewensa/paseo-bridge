@@ -59,12 +59,13 @@ try {
       for (const [path, check] of [
         ['/api/v1/openapi.json', text => JSON.parse(text).openapi === '3.1.0'],
         ['/api/v1/openapi', text => text.includes('redoc.standalone.js')],
-        ['/api/v1/openapi/assets/redoc.standalone.js', text => text.length > 1000000],
+        ['/api/v1/openapi/assets/redoc.standalone.js', text => text.length > 1000000 && !text.includes('https://cdn.redoc.ly/redoc/logo-mini.svg') && text.includes('data:image/svg+xml;base64,')],
         ['/api/v1/openapi/assets/redoc.licenses.txt', text => text.includes('MIT')]
       ]) {
         const text = await new Promise((resolve, reject) => {
           const req = http.get({ socketPath: socket, path }, res => {
             if (res.statusCode !== 200) { res.resume(); reject(new Error(`Document response ${res.statusCode}`)); return; }
+            if (res.headers['cache-control'] !== 'no-store, no-transform') { res.resume(); reject(new Error('Document cache/transform policy missing')); return; }
             let size = 0; const chunks = [];
             res.on('data', chunk => { size += chunk.length; if (size > 2 * 1024 * 1024) { reject(new Error('Document too large')); req.destroy(); } else chunks.push(chunk); });
             res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8'))); res.on('error', reject);
