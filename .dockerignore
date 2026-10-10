@@ -1,0 +1,12 @@
+*
+!Dockerfile
+!package.json
+!package-lock.json
+!tsconfig.json
+!cli.ts
+!server.ts
+!container.ts
+!src
+!src/**
+!scripts
+!scripts/bundle.mjs

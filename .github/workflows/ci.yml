@@ -28,3 +28,26 @@ jobs:
         with:
           name: paseo-bridge-node-${{ matrix.node }}
           path: build/paseo-bridge-linux-node.tar.gz
+  image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build immutable runtime image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+        run: |
+          docker build --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --label org.opencontainers.image.revision="$GITHUB_SHA" --tag "$IMAGE" .
+          docker run --rm "$IMAGE" --help
+          docker run --rm --entrypoint paseo-bridge "$IMAGE" --help
+      - name: Publish verified image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE"

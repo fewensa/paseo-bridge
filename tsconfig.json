@@ -4,5 +4,5 @@
     "rootDir": ".", "outDir": "dist", "strict": true,
     "esModuleInterop": true, "skipLibCheck": true, "sourceMap": false
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "cli.ts", "server.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "cli.ts", "server.ts", "container.ts"]
 }
