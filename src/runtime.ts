@@ -16,7 +16,7 @@ export async function loadHosts(config: ServerConfig): Promise<Map<string, Conne
 }
 export async function runServer(configFile: string, createHosts = loadHosts) {
   const config = await readConfig(configFile, serverSchema);
-  const service = new BridgeService(await createHosts(config), config.requestTimeoutMs);
+  const service = new BridgeService(await createHosts(config), config.requestTimeoutMs, config.stateDir);
   const servers: Server[] = [];
   try {
     const local = apiServer(service); servers.push(local); await listenSocket(local, config.socket);

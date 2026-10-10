@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { open, unlink } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { atomicSecret, secretFile, hostName, operations, type ServerConfig } from './config.js';
 import { authSchema, digest, type AuthRegistry } from './auth.js';
 import { createConnection, relayConfig } from './paseo/connection.js';
@@ -47,6 +48,8 @@ export async function issueToken(config: ServerConfig, id: string, hosts: string
     // Exclusive creation prevents overwriting another credential or following symlinks.
     const output = await open(tokenFile, 'wx', 0o600);
     try { await output.writeFile(token); await output.sync(); } finally { await output.close(); }
+    const directory = await open(dirname(tokenFile), 'r');
+    try { await directory.sync(); } finally { await directory.close(); }
     value.clients[id] = { digest: digest(token), hosts, operations: ops as typeof operations[number][] };
   });
   return { client: id, issued: true, tokenFile };

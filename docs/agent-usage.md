@@ -6,7 +6,7 @@ Use `paseo-bridge`, not a new temporary direct Paseo connection on every invocat
 2. Obtain permission for the specific prompt/destination. Write prompt content to an appropriately protected file. Do not put credentials or secrets in the prompt.
 3. `send --host HOST --agent ID --prompt-file FILE`. Busy is an error: wait or report it; never add `--interrupt` automatically. Do not send to `all`.
 4. If accepted, optionally `wait --host HOST --agent ID --timeout 120`, then `activity --host HOST --agent ID --tail 20`. A wait does not bind to a particular request ID; verify the expected content/marker in activity.
-5. If send is unknown or the client connection fails, **do not automatically retry**. Check activity and coordinate with the operator. A timeout does not prove a prompt was not accepted.
+5. If send is unknown or the client connection fails, **do not automatically retry**. Check activity and coordinate with the operator. A timeout does not prove a prompt was not accepted. An unresolved submission blocks further sends with SEND_UNCERTAIN across restarts; ask the operator to reconcile it. Do not clear guards yourself, restart to bypass them, or treat idle as proof of non-delivery.
 6. Present the reply to the user. Do not autonomously forward it to another agent, initiate recursive conversation, or invent subsequent work.
 
 Exit codes: 0 = successful API operation/accepted send; 1 = invalid request/error; 2 = partial query, uncertain send, or wait timeout. `status` can exit 0 with disconnected hosts, and a completed agent can have an error result; inspect JSON fields rather than relying only on the process exit code. JSON stdout is machine-readable; errors go to stderr. No prompt/credential content appears in Bridge logs.

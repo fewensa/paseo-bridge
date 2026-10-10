@@ -51,7 +51,7 @@ Output is always JSON (`--json` is accepted). Queries return per-host results, t
 - `all` is query-only. Sending/activity/wait require explicit host and agent ID, never name matching.
 - Busy sends are rejected. `--interrupt` is an explicit opt-in and may interrupt the target's current turn.
 - An accepted send is **not** a completed turn. Use `wait` followed by `activity`.
-- Unknown send outcomes are never retried automatically. Inspect activity before deciding whether to send again.
+- Unknown send outcomes are never retried automatically. Unresolved submissions are durably guarded across restarts; another send requires operator reconciliation and local clearance unless the original SDK request later confirms acceptance.
 - Paseo 0.11.1 cannot atomically enforce idle-only delivery across other clients. A concurrent external turn may receive the default send as `steer`, not as an interrupt.
 - No autonomous forwarding, agent creation/deletion, terminal execution, workspace mutation, or recursive conversations.
 
@@ -65,7 +65,7 @@ paseo-bridge --config /etc/paseo-bridge/bridge.json admin verify-host aspen
 # Verify durable configuration before manually deleting the temporary pair file.
 ```
 
-Import verifies Relay connectivity before persisting. It does **not** delete its input. Reload host configuration using `systemctl reload paseo-bridge`; listener changes require restart. Tokens can be scoped, issued, and revoked without exposing administrative operations through the API.
+Import verifies Relay connectivity before persisting. It does **not** delete its input. Reload host configuration using `systemctl reload paseo-bridge`; listener changes require restart. Tokens can be scoped, issued, and revoked without exposing administrative operations through the API. `admin inspect-send HOST --agent ID` exposes only submission metadata. Clearing an unresolved send requires stopping the Bridge, matching its request ID and explicitly confirming reconciliation; see the deployment guide.
 
 See [security and protocol](docs/security.md), [deployment/rollback](docs/deployment.md), and [agent usage](docs/agent-usage.md).
 
@@ -81,4 +81,4 @@ node scripts/verify-package.mjs
 PASEO_TEST_LOCAL_CREDENTIAL=/absolute/path/to/local-credential npm test
 ```
 
-Tests exercise SDK WebSocket connections and official Relay E2EE channels, protected pairing import/persisted verification, daemon restart/reconnect, persistent identity, reload/shutdown races, Unix sockets, HTTPS trust, authentication/revocation/scopes, client-capacity isolation, pagination/partial failure, send busy/uncertain behavior, CLI profiles and packaging. HTTPS tests use a generated local certificate and require `openssl`. Live ASPEN Relay acceptance and public HTTPS deployment need operator-supplied pairing files/domain; passing local tests does not assert those deployments have happened.
+Tests exercise SDK WebSocket connections and official Relay E2EE channels, protected pairing import/persisted verification, daemon restart/reconnect, persistent identity, reload/shutdown races, Unix sockets, HTTPS trust, authentication/revocation/scopes, client-capacity isolation, pagination/partial failure, send busy/uncertain behavior and durable quarantine/reconciliation, CLI profiles and packaging. HTTPS tests use a generated local certificate and require `openssl`. Live ASPEN Relay acceptance and public HTTPS deployment need operator-supplied pairing files/domain; passing local tests does not assert those deployments have happened.

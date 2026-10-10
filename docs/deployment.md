@@ -101,18 +101,32 @@ sudo -u paseo-bridge paseo-bridge --config /etc/paseo-bridge/bridge.json admin r
 
 Revocation affects the next request immediately (registry is reread). Already authorized in-flight requests are not retroactively canceled. Issue replacement into a **new** file and transfer securely. Revoking central tokens does not revoke local Unix-socket permissions.
 
-## 5. Reload, migration and rollback
+## 5. Reconcile an uncertain send
 
-After importing/updating host credentials or editing host mappings, `sudo systemctl reload paseo-bridge`. SIGHUP validates/builds the new configuration before replacing the host map; invalid reloads retain the current configuration. Existing host connections are replaced and outstanding operations can fail; schedule reloads when no sends/waits are in flight. Changing socket, state directory, central listener or request timeout requires `restart`. IDs in `/var/lib/paseo-bridge/*.client-id` must survive upgrades.
+Durable safety markers live in `/var/lib/paseo-bridge/submissions/`. The marker is persisted **before** dispatch and removed only on confirmed SDK acceptance. A Bridge response timeout can still be resolved automatically if the pending SDK request later confirms acceptance. SDK rejection, its own timeout, disconnect, or a crash leaves the outcome unresolved; another send to that host/agent is refused with `SEND_UNCERTAIN` even after service restart. No automatic retry occurs. A marker may conservatively remain after a crash before dispatch or after failed cleanup.
+
+1. Read `activity`, check destination state, and coordinate with the destination operator. **Idle alone is not sufficient proof** that a delayed earlier submission cannot still take effect. Do not clear a marker merely to retry. Establish whether the original prompt was accepted/completed/rejected and whether another prompt is safe.
+2. Inspect the metadata (contains no prompt or credentials):
+   `sudo -u paseo-bridge paseo-bridge --config /etc/paseo-bridge/bridge.json admin inspect-send aspen --agent EXACT_ID`.
+3. Stop the service and confirm the process has exited: `sudo systemctl stop paseo-bridge`. Clearance refuses an existing socket pathname, even a stale one; do not unlink a live service's socket to bypass this check.
+4. Only after actual reconciliation, clear the **matching** request ID:
+   `sudo -u paseo-bridge paseo-bridge --config /etc/paseo-bridge/bridge.json admin clear-send aspen --agent EXACT_ID --request-id UUID_FROM_INSPECTION --confirm-reconciled`.
+5. Start the service, verify status/activity, and decide explicitly whether any new prompt is required. Never bulk-delete submission files to unblock agents.
+
+This intentionally prefers operator intervention to overlapping ambiguous prompts. Central API tokens cannot inspect or clear administrative guard files. Keep submission guard files with state during upgrades/migration; deleting them or switching state directories would defeat this protection.
+
+## 6. Reload, migration and rollback
+
+After importing/updating host credentials or editing host mappings, `sudo systemctl reload paseo-bridge`. SIGHUP validates/builds the new configuration before replacing the host map; invalid reloads retain the current configuration. Existing host connections are replaced and outstanding operations can fail; schedule reloads when no sends/waits are in flight. Changing socket, state directory, central listener or request timeout requires `restart`. IDs in `/var/lib/paseo-bridge/*.client-id` and unresolved `/var/lib/paseo-bridge/submissions/` markers must survive upgrades.
 
 To move central deployment from BIRCH to HUB:
 
-1. Install the same build/config with service-account permissions on HUB. Securely transfer only the Bridge credential registry, intended host credentials and client identity files—not the Paseo home.
+1. Install the same build/config with service-account permissions on HUB. Securely transfer only the Bridge credential registry, intended host credentials, client identity files and unresolved submission markers—not the Paseo home.
 2. Stop the old central Bridge before starting the new one with the same client IDs. Do not run concurrent owners of a state directory/identity.
 3. Verify all host statuses on HUB through its local socket; point DNS/TLS proxy to HUB and explicitly test each central profile.
 4. Retire old access only after verification. Tokens remain valid if the digest registry is migrated; rotate them if the old host is not trusted.
 
-Keep the previous binaries/config before upgrading. Rollback: stop the Bridge, restore the previous two binaries and compatible server config, retain credential/state files, start it, verify status/queries. This version uses schema version 1 and no database migration. Do not “rollback” by deleting credentials or rewriting identity files. Connection credentials and token digests are sensitive even in backups.
+Keep the previous binaries/config before upgrading. Rollback: stop the Bridge, restore the previous two binaries and compatible server config, retain credential/state files, start it, verify status/queries. This version uses schema version 1 and no database migration. Do not “rollback” by deleting credentials/submission markers or rewriting identity files. Connection credentials and token digests are sensitive even in backups.
 
 ## Acceptance checks requiring real infrastructure
 

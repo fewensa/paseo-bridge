@@ -6,6 +6,7 @@ import { readConfig, clientSchema, serverSchema, operations } from '../config.js
 import { requestSchema } from '../service.js';
 import { call } from '../api/client.js';
 import { importHost, issueToken, revokeToken, verifyPersistence } from '../admin.js';
+import { inspectSubmission, clearSubmission } from '../submissions.js';
 import { BridgeError, publicError } from '../errors.js';
 
 const help = `paseo-bridge [--config FILE] [--profile NAME] COMMAND [OPTIONS]
@@ -21,6 +22,8 @@ Local administration (use --config SERVER.json):
   admin verify-host NAME
   admin issue-token NAME --hosts birch,aspen --operations status,agents,workspaces,send,activity,wait --token-file FILE
   admin revoke-token NAME
+  admin inspect-send HOST --agent ID
+  admin clear-send HOST --agent ID --request-id UUID --confirm-reconciled (Bridge must be stopped)
 Secrets are read/written through files, never printed. Import does not delete its input.
 Server: paseo-bridge-server --config SERVER.json
 `;
@@ -30,7 +33,7 @@ export async function cliMain(args = process.argv.slice(2)): Promise<void> {
       config: { type: 'string' }, profile: { type: 'string' }, host: { type: 'string' }, agent: { type: 'string' },
       'prompt-file': { type: 'string' }, interrupt: { type: 'boolean' }, tail: { type: 'string' }, timeout: { type: 'string' },
       'pair-file': { type: 'string' }, 'password-file': { type: 'string' }, hosts: { type: 'string' },
-      operations: { type: 'string' }, 'token-file': { type: 'string' }, help: { type: 'boolean', short: 'h' }, json: { type: 'boolean' }
+      operations: { type: 'string' }, 'token-file': { type: 'string' }, 'request-id': { type: 'string' }, 'confirm-reconciled': { type: 'boolean' }, help: { type: 'boolean', short: 'h' }, json: { type: 'boolean' }
     } });
     if (values.help || !positionals.length) { console.log(help); return; }
     let result: any;
@@ -43,6 +46,9 @@ export async function cliMain(args = process.argv.slice(2)): Promise<void> {
       else if (action === 'issue-token' && values['token-file'] && values.hosts && values.operations)
         result = await issueToken(config, name, values.hosts.split(','), values.operations.split(','), values['token-file']);
       else if (action === 'revoke-token') result = await revokeToken(config, name);
+      else if (action === 'inspect-send' && values.agent) result = await inspectSubmission(config, name, values.agent);
+      else if (action === 'clear-send' && values.agent && values['request-id'] && values['confirm-reconciled'])
+        result = await clearSubmission(config, name, values.agent, values['request-id']);
       else throw new BridgeError('USAGE', 'Invalid admin command; use --help');
     } else {
       if (positionals.length !== 1 || !operations.includes(positionals[0] as any)) throw new BridgeError('USAGE', 'Unknown command');

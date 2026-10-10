@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { operations, hostName } from './config.js';
 import type { Connection } from './paseo/connection.js';
 import { BridgeError, deadline, publicError } from './errors.js';
+import { SubmissionGuards } from './submissions.js';
 
 export const requestSchema = z.object({
   op: z.enum(operations), host: z.union([hostName, z.literal('all')]),
@@ -20,7 +21,10 @@ export const requestSchema = z.object({
 export type Request = z.infer<typeof requestSchema>;
 export class BridgeService {
   private sending = new Set<string>();
-  constructor(public hosts: Map<string, Connection>, private timeoutMs = 15000) {}
+  private guards: SubmissionGuards;
+  constructor(public hosts: Map<string, Connection>, private timeoutMs = 15000, stateDir?: string) {
+    this.guards = new SubmissionGuards(stateDir);
+  }
   async execute(request: Request, allowed?: ReadonlySet<string>): Promise<unknown> {
     const expiresAt = Date.now() + (request.op === 'wait' ? request.timeout * 1000 : this.timeoutMs);
     const remaining = () => {
@@ -72,8 +76,9 @@ export class BridgeService {
       // Serialize preflight and dispatch, not just dispatch after stale refreshes.
       this.sending.add(key);
     }
-    let submitted = false;
+    let submitted = false; let prepared: string | undefined;
     try {
+      if (request.op === 'send') await this.guards.assertClear(request.host, agent.id);
       const snapshot = await deadline(agent.refresh(), Math.min(this.timeoutMs, remaining()));
       if (!snapshot || snapshot.agent.archivedAt) throw new BridgeError('AGENT', 'Agent not found or archived', 404);
       if (request.op === 'activity') {
@@ -88,22 +93,29 @@ export class BridgeService {
       }
       if (snapshot.agent.status !== 'idle' && !request.interrupt)
         throw new BridgeError('BUSY', 'Agent is not idle; explicit interrupt required', 409);
-      const sendTimeout = remaining();
       const requestId = randomUUID();
+      await this.guards.prepare(request.host, agent.id, requestId);
+      prepared = requestId;
+      const sendTimeout = remaining();
       // steer avoids implicit interruption if an external client starts a turn
       // between idle check and dispatch. Atomic cross-client idle-only delivery
       // is not supported by Paseo 0.11.1.
       const submission = Promise.resolve().then(() => agent.send(request.prompt!, { messageId: requestId,
         activeTurnBehavior: request.interrupt ? 'interrupt' : 'steer' }));
       submitted = true;
-      // The response deadline cannot cancel SDK work. Release only on actual settlement.
-      void submission.then(() => this.sending.delete(key), () => this.sending.delete(key));
+      // Only confirmed acceptance clears the durable guard. SDK rejection/timeout
+      // is still ambiguous and must survive restart until local reconciliation.
+      const settlement = submission.then(() => this.guards.clear(request.host, agent.id, requestId));
+      void settlement.then(() => this.sending.delete(key), () => this.sending.delete(key));
       try {
-        await deadline(submission, sendTimeout);
+        await deadline(settlement, sendTimeout);
         return { host: request.host, agentId: agent.id, requestId, status: 'accepted' };
       } catch { return { host: request.host, agentId: agent.id, requestId, status: 'unknown', retrySafe: false }; }
     } finally {
-      if (request.op === 'send' && !submitted) this.sending.delete(key);
+      if (request.op === 'send' && !submitted) {
+        try { if (prepared) await this.guards.clear(request.host, agent.id, prepared); }
+        finally { this.sending.delete(key); }
+      }
     }
   }
   private online(connection: Connection) {
