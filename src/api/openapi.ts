@@ -46,7 +46,7 @@ for (const { path, media, summary } of documentRoutes) registry.registerPath({ m
     429: errors[429], 500: errors[502] } });
 
 export function generateOpenAPI() { return new OpenApiGeneratorV31(registry.definitions).generateDocument({
-  openapi: '3.1.0', info: { title: 'Paseo Bridge API', version: '0.2.0',
+  openapi: '3.1.0', info: { title: 'Paseo Bridge API', version: '0.2.1',
     description: 'REST commands and snapshots with recommended SSE observation. Prefer SSE for ongoing status/activity; clients without streaming support may poll agent and activity endpoints. Authentication, host/operation scopes and uncertainty rules apply to both modes. Local Unix-socket and central HTTPS clients use the same paths. Administrative operations are never exposed through HTTP.' },
   servers: [{ url: '/' }]
 }); }

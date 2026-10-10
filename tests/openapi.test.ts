@@ -43,9 +43,9 @@ test('application serves anonymous self-hosted Redoc, generated JSON and fixed a
   const server = apiServer(new BridgeService(new Map()), auth); await listen(server, 0, '127.0.0.1');
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   try {
-    const spec = await fetch(url + '/api/v1/openapi.json'); assert.equal(spec.status, 200); assert.equal(spec.headers.get('cache-control'), 'no-store');
+    const spec = await fetch(url + '/api/v1/openapi.json'); assert.equal(spec.status, 200); assert.equal(spec.headers.get('cache-control'), 'no-store, no-transform');
     const text = await spec.text(); assert.deepEqual(JSON.parse(text), openapiDocument); assert(!text.includes(token)); assert(!text.includes('secret-host')); assert(!text.includes('privateClient')); assert(!text.includes(dir));
-    const html = await fetch(url + '/api/v1/openapi'); assert.equal(html.status, 200); assert(html.headers.get('content-security-policy')?.includes("script-src 'self'"));
+    const html = await fetch(url + '/api/v1/openapi'); assert.equal(html.status, 200); assert.equal(html.headers.get('cache-control'), 'no-store, no-transform'); assert(html.headers.get('content-security-policy')?.includes("script-src 'self'"));
     const page = await html.text(); assert(page.includes('./openapi/assets/redoc.standalone.js')); assert(!page.includes('https://')); assert(page.includes('disableGoogleFont:true'));
     const js = await fetch(url + '/api/v1/openapi/assets/redoc.standalone.js'); assert.equal(js.status, 200); assert(js.headers.get('content-type')?.includes('javascript')); const source = await js.text(); assert(source.length > 1000000); assert(!source.includes('https://cdn.redoc.ly/redoc/logo-mini.svg')); assert(source.includes('data:image/svg+xml;base64,'));
     const license = await fetch(url + '/api/v1/openapi/assets/redoc.licenses.txt'); assert.equal(license.status, 200); assert((await license.text()).includes('MIT'));
