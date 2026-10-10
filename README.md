@@ -69,6 +69,14 @@ Import verifies Relay connectivity before persisting. It does **not** delete its
 
 See [security and protocol](docs/security.md), [deployment/rollback](docs/deployment.md), and [agent usage](docs/agent-usage.md).
 
+## Container runtime
+
+After the Node.js 22/24 checks pass on `main`, CI publishes an amd64 runtime image to `ghcr.io/fewensa/paseo-bridge:sha-<commit>`. Pin the resulting digest when deploying; private packages require a registry pull credential. The image runs as UID/GID 1000 and contains the bundled server and `paseo-bridge` CLI without runtime `node_modules`.
+
+Mount the server configuration at `/etc/paseo-bridge/bridge.json`, current-user-owned mode-600 credentials at its configured paths, and persistent storage at `/var/lib/paseo-bridge`. Use one replica with a stop-before-start rollout: submission guards are not cross-process locks. Keep central HTTP loopback-only and proxy it to authenticated HTTPS; never expose port 8787 directly. The chart opts into PID-1, private-container socket recovery at `/run/paseo-bridge/socket/bridge.sock`: only a current-user-owned stale socket with no listener is removed. Ordinary server/local startup still refuses any existing socket; never share this runtime with another writer.
+
+The `fes-de0` deployment is maintained in `repotea-workflow/gitops-fes`, under `charts/infra/paseo-bridge-helm` and `argocd/infra/paseo-bridge-de0`. Its chart documents Secret projection, credential ownership, persistent-state preservation, and stopped-service reconciliation.
+
 ## Verification
 
 ```sh
