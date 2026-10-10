@@ -1,0 +1,21 @@
+# Replace with your own reachable domain. Caddy manages public TLS certificates.
+bridge.example.com {
+    # Do not enable request/header logging of Authorization or request bodies.
+    request_body {
+        max_size 256KB
+    }
+    @api {
+        method POST
+        path /v1/request
+    }
+    handle @api {
+        reverse_proxy 127.0.0.1:8787 {
+            transport http {
+                response_header_timeout 610s
+            }
+        }
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hosts": {
+    "birch": { "connectionFile": "/etc/paseo-bridge/credentials/birch.json" },
+    "aspen": { "connectionFile": "/etc/paseo-bridge/credentials/aspen.json" }
+  },
+  "socket": "/run/paseo-bridge/bridge.sock",
+  "stateDir": "/var/lib/paseo-bridge",
+  "requestTimeoutMs": 15000,
+  "central": { "port": 8787, "authFile": "/etc/paseo-bridge/credentials/clients.json" }
+}

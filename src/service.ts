@@ -1,0 +1,112 @@
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { operations, hostName } from './config.js';
+import type { Connection } from './paseo/connection.js';
+import { BridgeError, deadline, publicError } from './errors.js';
+
+export const requestSchema = z.object({
+  op: z.enum(operations), host: z.union([hostName, z.literal('all')]),
+  agent: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/).optional(),
+  prompt: z.string().min(1).max(65536).optional(),
+  interrupt: z.boolean().default(false),
+  tail: z.number().int().min(0).max(200).default(20),
+  timeout: z.number().int().min(1).max(600).default(120)
+}).strict().superRefine((r, ctx) => {
+  if (['send', 'activity', 'wait'].includes(r.op) && (!r.agent || r.host === 'all'))
+    ctx.addIssue({ code: 'custom', message: 'Explicit host and agent required' });
+  if (r.op === 'send' && !r.prompt?.trim()) ctx.addIssue({ code: 'custom', message: 'Prompt required' });
+  if (r.interrupt && r.op !== 'send') ctx.addIssue({ code: 'custom', message: 'Interrupt is send-only' });
+});
+export type Request = z.infer<typeof requestSchema>;
+export class BridgeService {
+  private sending = new Set<string>();
+  constructor(public hosts: Map<string, Connection>, private timeoutMs = 15000) {}
+  async execute(request: Request, allowed?: ReadonlySet<string>): Promise<unknown> {
+    const expiresAt = Date.now() + (request.op === 'wait' ? request.timeout * 1000 : this.timeoutMs);
+    const remaining = () => {
+      const ms = expiresAt - Date.now();
+      if (ms <= 0) throw new BridgeError('TIMEOUT', 'Operation timed out', 504);
+      return ms;
+    };
+    const selected = request.host === 'all' ? [...this.hosts.keys()].filter(x => !allowed || allowed.has(x)) : [request.host];
+    if (selected.some(x => allowed && !allowed.has(x))) throw new BridgeError('FORBIDDEN', 'Host not permitted', 403);
+    if (selected.some(x => !this.hosts.has(x))) throw new BridgeError('HOST', 'Unknown host', 404);
+    if (['status', 'agents', 'workspaces'].includes(request.op)) {
+      let totalEntries = 0; let totalBytes = 0;
+      const results = await Promise.all(selected.map(async host => {
+        const connection = this.hosts.get(host)!;
+        const fetchedAt = new Date().toISOString();
+        if (request.op === 'status') return { host, state: connection.state(), fetchedAt };
+        try {
+          this.online(connection);
+          const entries: unknown[] = [];
+          let cursor: string | undefined;
+          const seen = new Set<string>();
+          do {
+            const page = { limit: 200, ...(cursor ? { cursor } : {}) };
+            const result = request.op === 'agents'
+              ? await deadline(connection.api.agents.list({ page }), remaining())
+              : await deadline(connection.api.workspaces.list({ page }), remaining());
+            const batch = result.entries.map(entry => request.op === 'agents' ? (entry as { agent: unknown }).agent : entry);
+            totalEntries += batch.length;
+            totalBytes += Buffer.byteLength(JSON.stringify(batch));
+            if (totalEntries > 10000 || totalBytes > 12 * 1024 * 1024)
+              throw new BridgeError('RESULT_LIMIT', 'Query exceeds aggregate limit; narrow the host selection', 502);
+            entries.push(...batch);
+            cursor = result.pageInfo.nextCursor ?? undefined;
+            if (cursor && seen.has(cursor)) throw new BridgeError('PAGINATION', 'Repeated pagination cursor', 502);
+            if (cursor) seen.add(cursor);
+            if (seen.size > 1000) throw new BridgeError('PAGINATION', 'Too many pages', 502);
+          } while (cursor);
+          return { host, fetchedAt, entries };
+        } catch (error) { const e = publicError(error); return { host, fetchedAt, error: { code: e.code, message: e.message } }; }
+      }));
+      return { results, partial: results.some(r => 'error' in r) };
+    }
+    const connection = this.hosts.get(request.host)!;
+    this.online(connection);
+    const agent = connection.api.agents.ref(request.agent!);
+    const key = `${request.host}/${agent.id}`;
+    if (request.op === 'send') {
+      if (this.sending.has(key)) throw new BridgeError('BUSY', 'Another send is in progress', 409);
+      // Serialize preflight and dispatch, not just dispatch after stale refreshes.
+      this.sending.add(key);
+    }
+    let submitted = false;
+    try {
+      const snapshot = await deadline(agent.refresh(), Math.min(this.timeoutMs, remaining()));
+      if (!snapshot || snapshot.agent.archivedAt) throw new BridgeError('AGENT', 'Agent not found or archived', 404);
+      if (request.op === 'activity') {
+        if (request.tail === 0) return { host: request.host, agentId: agent.id, entries: [] };
+        const page = await deadline(agent.timeline.refetch({ direction: 'before', limit: request.tail }), remaining());
+        return { host: request.host, agentId: agent.id, fetchedAt: new Date().toISOString(), timeline: page };
+      }
+      if (request.op === 'wait') {
+        const ms = remaining();
+        const result = await deadline(agent.waitForFinish(ms), ms + 1000);
+        return { host: request.host, agentId: agent.id, result };
+      }
+      if (snapshot.agent.status !== 'idle' && !request.interrupt)
+        throw new BridgeError('BUSY', 'Agent is not idle; explicit interrupt required', 409);
+      const sendTimeout = remaining();
+      const requestId = randomUUID();
+      // steer avoids implicit interruption if an external client starts a turn
+      // between idle check and dispatch. Atomic cross-client idle-only delivery
+      // is not supported by Paseo 0.11.1.
+      const submission = Promise.resolve().then(() => agent.send(request.prompt!, { messageId: requestId,
+        activeTurnBehavior: request.interrupt ? 'interrupt' : 'steer' }));
+      submitted = true;
+      // The response deadline cannot cancel SDK work. Release only on actual settlement.
+      void submission.then(() => this.sending.delete(key), () => this.sending.delete(key));
+      try {
+        await deadline(submission, sendTimeout);
+        return { host: request.host, agentId: agent.id, requestId, status: 'accepted' };
+      } catch { return { host: request.host, agentId: agent.id, requestId, status: 'unknown', retrySafe: false }; }
+    } finally {
+      if (request.op === 'send' && !submitted) this.sending.delete(key);
+    }
+  }
+  private online(connection: Connection) {
+    if (connection.state() !== 'connected') throw new BridgeError('OFFLINE', 'Host is not connected', 503);
+  }
+}

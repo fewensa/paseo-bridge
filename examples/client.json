@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "defaultProfile": "local",
+  "profiles": {
+    "local": { "kind": "local", "socket": "/run/paseo-bridge/bridge.sock" },
+    "central": {
+      "kind": "central",
+      "url": "https://bridge.example.com",
+      "tokenFile": "/home/bridge-client/.config/paseo-bridge/central.token"
+    }
+  }
+}
