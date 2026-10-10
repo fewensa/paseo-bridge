@@ -19,6 +19,12 @@ test('atomic persistence durably provisions missing ancestor directories', async
   await atomicSecret(file, 'one'); assert.equal(await secretFile(file), 'one');
   await atomicSecret(file, 'two'); assert.equal(await secretFile(file), 'two');
 });
+test('concurrent first-use writers safely provision the same ancestor chain', async () => {
+  const dir = await directory();
+  const files = Array.from({ length: 8 }, (_, index) => join(dir, 'shared', 'nested', `${index}.json`));
+  await Promise.all(files.map((file, index) => atomicSecret(file, String(index))));
+  assert.deepEqual(await Promise.all(files.map(file => secretFile(file))), files.map((_, index) => String(index)));
+});
 test('secret symlinks rejected', async () => {
   const dir = await directory(); const file = join(dir, 'secret'); const link = join(dir, 'link');
   await secret(file, 'sensitive'); await symlink(file, link); await assert.rejects(secretFile(link));

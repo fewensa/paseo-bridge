@@ -49,15 +49,13 @@ export async function readConfig<T>(file: string, schema: z.ZodType<T>): Promise
 }
 export async function durableDirectory(directory: string): Promise<void> {
   const parent = dirname(directory);
+  if (parent === directory) return; // Filesystem root (or cwd for relative paths).
+  // Always finish the ancestor chain first, even if another writer has already
+  // created a directory but has not yet synced its parent's directory entry.
+  await durableDirectory(parent);
   try { await mkdir(directory, { mode: 0o700 }); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && parent !== directory) {
-      await durableDirectory(parent);
-      try { await mkdir(directory, { mode: 0o700 }); }
-      catch (retry) { if ((retry as NodeJS.ErrnoException).code !== 'EEXIST') throw retry; }
-    } else if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-  }
-  // Persist each newly provisioned ancestor's entry, not only the final file.
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+  // Persist each directory entry before allowing child creation/dispatch.
   const handle = await open(parent, constants.O_RDONLY);
   try { await handle.sync(); } finally { await handle.close(); }
 }
