@@ -1,3 +1,7 @@
+# Central migration in 0.3
+
+Central deployment must follow [E2EE provisioning and migration](e2ee.md). The former centralized daemon-credential layout below is retained only as historical local/service administration guidance; it is rejected by the 0.3 central runtime. Central has `hosts:{}` and `broker.endpointClients`, and each host runs its own endpoint. Never import host pairing credentials into the broker.
+
 # Deployment and rollback
 
 ## Choose a mode

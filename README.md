@@ -6,10 +6,10 @@ A resident, multi-host bridge for agents using Paseo 0.11.1. Discover workspaces
 
 ```text
 Per-machine: CLI --profile local   → Unix socket → local Bridge → Paseo Relay → daemons
-Central:     CLI --profile central → HTTPS      → central Bridge → Paseo Relay → daemons
+Central:     CLI → E2EE over HTTPS → opaque central broker → E2EE over WSS → host endpoint → local daemon
 ```
 
-Relay connections use the official Paseo SDK's E2EE implementation. The central Bridge is a trusted endpoint that decrypts prompts and activity. Each machine can have a separate central token with host and operation scopes. The selected profile determines which Bridge the CLI connects to.
+Relay connections use the official Paseo SDK's E2EE implementation. Central mode uses pinned X25519 keys and AES-256-GCM between the CLI and the destination host's local endpoint; the central broker cannot decrypt messages or activity. Central bearer tokens and endpoint public-key grants constrain hosts and operations independently. Both CLIs require explicit pinned key configuration and never fall back to plaintext. See [central E2EE protocol and migration](docs/e2ee.md).
 
 ## Install
 
@@ -31,7 +31,7 @@ sudo ln -s /opt/paseo-bridge/paseo-bridge-server.mjs /usr/local/bin/paseo-bridge
 paseo-bridge --help
 ```
 
-Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.2.1.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24.
+Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.3.0.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24.
 
 ## Use
 

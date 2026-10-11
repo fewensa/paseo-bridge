@@ -2,10 +2,10 @@
 
 ## Trust boundaries
 
-- Paseo Relay transport/cryptography is implemented by the pinned official SDK, not this project. Relay pairing always uses TLS plus E2EE with the offered daemon public key. Pair credentials are sensitive; the Relay operator cannot read encrypted prompt content, but the Bridge and destination daemon can.
-- CLI ↔ central Bridge uses validated HTTPS and a separate random 256-bit client token. Server storage contains SHA-256 verification digests, not plaintext client tokens. Comparisons use `timingSafeEqual`.
+- Paseo Relay transport/cryptography is implemented by the pinned official SDK, not this project. Relay pairing always uses TLS plus E2EE with the offered daemon public key. Pair credentials are sensitive; the Relay operator cannot read encrypted prompt content, but the local host endpoint and destination daemon can; the central broker cannot.
+- CLI ↔ local host endpoint uses pinned-key E2EE through the central broker; see [the complete wire and trust contract](e2ee.md). Central admission uses validated HTTPS and a separate random 256-bit client token. Server storage contains SHA-256 verification digests, not plaintext client tokens. Comparisons use `timingSafeEqual`.
 - CLI ↔ local Bridge uses a Unix socket with filesystem user/group authorization. Local socket access is broad and trusted. There is no agent-level sandboxing or central-token authentication on the socket.
-- The central backend listens only on loopback. Use the included TLS reverse-proxy template; never expose the backend port. Backend requests still need tokens. The proxy is trusted with Authorization and plaintext request content.
+- The central backend listens only on loopback. Use the included TLS reverse-proxy template; never expose the backend port. Backend requests still need tokens. The proxy sees Authorization and encrypted packets, never plaintext business content.
 - Administration is never exposed via HTTP. An authorized API user cannot import hosts, issue/revoke tokens, execute terminals, mutate workspaces or delete agents. Prompt content can still ask a destination agent to act; destination permissions are outside this Bridge's enforcement.
 
 ## Secret handling
@@ -18,7 +18,7 @@ Central credentials authorize named operations on named hosts. They do **not** l
 
 ## Request/response contract
 
-Version 0.2 replaces the removed `/v1/request` protocol with separate REST routes. Update the CLI and service together. Both Unix-socket and central HTTPS modes use these paths; only central business routes require `Authorization: Bearer <token>`. JSON success: `{ "ok": true, "data": ... }`. Errors: `{ "ok": false, "error": { "code": ..., "message": ... } }`. CLI prints `data` on stdout and error JSON on stderr. `/health` and all administrative/destructive endpoints do not exist.
+Version 0.2 replaces the removed `/v1/request` protocol with separate REST routes. Update the CLI and service together. The Unix socket uses these paths directly. Encrypted central clients reconstruct this logical API through the E2EE tunnel; old central business routes return HTTP 426. Central tunnels require `Authorization: Bearer <token>`. JSON success: `{ "ok": true, "data": ... }`. Errors: `{ "ok": false, "error": { "code": ..., "message": ... } }`. CLI prints `data` on stdout and error JSON on stderr. `/health` and all administrative/destructive endpoints do not exist.
 
 | Method and path | Scope | Result |
 | --- | --- | --- |

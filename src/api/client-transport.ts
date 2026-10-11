@@ -2,19 +2,22 @@ import http from 'node:http';
 import https from 'node:https';
 import { readFile } from 'node:fs/promises';
 import { secretFile, type ClientConfig } from '../config.js';
+import { loadIdentity, encryptedRequest, type Identity } from '../e2ee/client.js';
 import { BridgeError } from '../errors.js';
 
 export const RESPONSE_LIMIT = 16 * 1024 * 1024;
-export interface Transport { module: typeof http | typeof https; options: https.RequestOptions; prefix: string }
+export interface Transport { module: typeof http | typeof https; options: https.RequestOptions; prefix: string; e2ee?: Identity }
 export async function clientTransport(config: ClientConfig, profile?: string): Promise<Transport> {
   const selected = config.profiles[profile ?? config.defaultProfile];
   if (!selected) throw new BridgeError('PROFILE', 'Unknown client profile');
   if (selected.kind === 'local') return { module: http, options: { socketPath: selected.socket }, prefix: '' };
   const url = new URL(selected.url);
   if (url.protocol !== 'https:') throw new BridgeError('TLS', 'HTTPS required');
+  if (!selected.e2eeFile) throw new BridgeError('ENCRYPTION_REQUIRED', 'Central profile requires pinned end-to-end encryption keys');
+  const identity = await loadIdentity(selected.e2eeFile);
   const token = await secretFile(selected.tokenFile);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new BridgeError('TOKEN', 'Invalid client token');
-  return { module: https, prefix: url.pathname.replace(/\/$/, ''), options: {
+  return { module: https, e2ee: identity, prefix: url.pathname.replace(/\/$/, ''), options: {
     hostname: url.hostname, port: url.port || 443, rejectUnauthorized: true,
     headers: { authorization: `Bearer ${token}` }, ...(selected.caFile ? { ca: await readFile(selected.caFile) } : {})
   } };
@@ -26,12 +29,15 @@ export function apiError(value: any, status = 502): BridgeError {
   const messages: Record<string, string> = { AUTH: 'Authentication failed', UNAUTHORIZED: 'Authentication failed', FORBIDDEN: 'Operation not permitted', SCOPE: 'Operation not permitted', OFFLINE: 'Host is not connected', CONNECTION: 'Bridge connection failed', AGENT: 'Agent not found or archived', HOST: 'Unknown host', BUSY: 'Agent is busy', SEND_UNCERTAIN: 'A prior send outcome is unknown; do not retry before reconciliation', VALIDATION: 'Invalid request' };
   return new BridgeError(code, messages[code] ?? 'Bridge request failed', status);
 }
+export function transportRequest(transport: Transport, options: https.RequestOptions, callback: (response: http.IncomingMessage) => void): http.ClientRequest {
+  return transport.e2ee ? encryptedRequest(transport, options, callback) : transport.module.request(options, callback);
+}
 export function jsonRequest(transport: Transport, path: string, options: { body?: unknown; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<any> {
   const sending = options.body !== undefined;
   const ambiguous = sending ? '; send outcome may be unknown; do not retry automatically' : '';
   return new Promise((resolve, reject) => {
     const payload = sending ? JSON.stringify(options.body) : undefined;
-    const req = transport.module.request({ ...transport.options, path: transport.prefix + path, method: sending ? 'POST' : 'GET', signal: options.signal,
+    const req = transportRequest(transport, { ...transport.options, path: transport.prefix + path, method: sending ? 'POST' : 'GET', signal: options.signal,
       headers: { ...transport.options.headers, accept: 'application/json', ...(payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {}) } }, res => {
       let size = 0; const chunks: Buffer[] = [];
       res.on('data', (chunk: Buffer) => {
