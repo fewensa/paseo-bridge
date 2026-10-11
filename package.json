@@ -2,6 +2,7 @@
   "name": "paseo-bridge",
   "version": "0.2.1",
   "description": "Persistent, authenticated multi-host Paseo bridge",
+  "license": "MIT",
   "type": "module",
   "private": true,
   "engines": {

@@ -9,11 +9,11 @@ Per-machine: CLI --profile local   → Unix socket → local Bridge → Paseo Re
 Central:     CLI --profile central → HTTPS      → central Bridge → Paseo Relay → daemons
 ```
 
-Relay connections use the official Paseo SDK's E2EE implementation. The central Bridge decrypts and sees prompts/activity: it is a trusted endpoint, not an opaque Relay. Each machine can have a separate central token with host and operation scopes. There is no fallback between profiles.
+Relay connections use the official Paseo SDK's E2EE implementation. The central Bridge is a trusted endpoint that decrypts prompts and activity. Each machine can have a separate central token with host and operation scopes. The selected profile determines which Bridge the CLI connects to.
 
 ## Install
 
-Requires **Node.js 22+**; no Go/Rust toolchain required.
+Requires **Node.js 22+**.
 
 ```sh
 npm ci --ignore-scripts
@@ -21,7 +21,7 @@ npm test
 npm run bundle
 ```
 
-`build/paseo-bridge.mjs` and `build/paseo-bridge-server.mjs` are executable, self-contained scripts. Copy them to a target with Node.js 22+; **npm and node_modules are not required on the target**:
+`build/paseo-bridge.mjs` and `build/paseo-bridge-server.mjs` are executable, self-contained scripts that run directly with Node.js 22+. Install them on the target:
 
 ```sh
 sudo install -d /opt/paseo-bridge
@@ -31,7 +31,7 @@ sudo ln -s /opt/paseo-bridge/paseo-bridge-server.mjs /usr/local/bin/paseo-bridge
 paseo-bridge --help
 ```
 
-Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.2.0.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24; it does not publish to npm.
+Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.2.1.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24.
 
 ## Use
 
@@ -44,27 +44,26 @@ paseo-bridge --profile central agents --host aspen
 paseo-bridge --profile central send --host aspen --agent AGENT_ID --prompt-file /path/to/prompt.txt
 paseo-bridge --profile central activity --host aspen --agent AGENT_ID --tail 20
 paseo-bridge --profile central wait --host aspen --agent AGENT_ID --timeout 120
-# Explicit compatibility mode for clients/environments without streaming:
+# Polling observation:
 paseo-bridge --profile central wait --host aspen --agent AGENT_ID --timeout 120 --wait-mode poll
 ```
 
 Output is always JSON (`--json` is accepted). Queries return per-host results, timestamps, and an explicit `partial` flag. Exit codes: `0` successful/accepted, `1` invalid request or error, `2` partial results, unknown send outcome, or wait timeout. A completed agent can have `result.status: "error"`; inspect the result, not just the exit code.
 
-- `all` is query-only. Sending/activity/wait require explicit host and agent ID, never name matching.
+- `all` is query-only. Sending/activity/wait require an explicit host and agent ID.
 - Busy sends are rejected. `--interrupt` is an explicit opt-in and may interrupt the target's current turn.
-- An accepted send is **not** a completed turn. Use `wait` followed by `activity`. `wait` defaults to read-only SSE observation and reconnects within its original deadline; use explicit `--wait-mode poll` for snapshot polling. No authentication/business error silently switches modes, and observation recovery never repeats a send.
+- An accepted send is **not** a completed turn. Use `wait` followed by `activity`. `wait` defaults to read-only SSE observation and reconnects within its original deadline; use explicit `--wait-mode poll` for snapshot polling. Authentication and business errors are returned to the caller; reconnects repeat only observation.
 - State observation keeps `result.lastMessage` null; activity permission is required to read replies. Idle is not proof of completion of a particular uncertain send.
 - Unknown send outcomes are never retried automatically. Unresolved submissions are durably guarded across restarts; another send requires operator reconciliation and local clearance unless the original SDK request later confirms acceptance.
 - Paseo 0.11.1 cannot atomically enforce idle-only delivery across other clients. A concurrent external turn may receive the default send as `steer`, not as an interrupt.
-- No autonomous forwarding, agent creation/deletion, terminal execution, workspace mutation, or recursive conversations.
 
 ## REST API and application-owned documentation
 
-Version 0.2 replaces the old `/v1/request` endpoint; update the service and CLI together. The same TypeScript CLI uses `/api/v1` REST routes over either Unix sockets or HTTPS. Sends use a dedicated messages POST; discovery, snapshots and activity use GET. SSE is recommended for ongoing observation, while ordinary snapshot/activity polling remains supported. See the [route and scope contract](docs/security.md#requestresponse-contract).
+The TypeScript CLI uses `/api/v1` REST routes over either Unix sockets or HTTPS. Sends use a dedicated messages POST; discovery, snapshots and activity use GET. SSE is recommended for ongoing observation, while ordinary snapshot/activity polling remains supported. See the [route and scope contract](docs/security.md#requestresponse-contract).
 
-The service anonymously serves generated OpenAPI 3.1 at `/api/v1/openapi.json` and Redoc at `/api/v1/openapi`, with self-hosted script/license assets under `/api/v1/openapi/assets/`. Shared route definitions and Zod schemas drive both runtime validation and generation, including concrete SDK agent, workspace, timeline and event outputs. `npm run openapi` also generates `build/openapi.json` for other-language client tooling. Documentation is application-owned, never derived by the proxy, and contains no runtime secrets or host inventory. Redoc and its licenses are included in npm and standalone/container distributions; no CDN or runtime npm installation is needed.
+The service anonymously serves generated OpenAPI 3.1 at `/api/v1/openapi.json` and Redoc at `/api/v1/openapi`, with self-hosted script/license assets under `/api/v1/openapi/assets/`. Shared route definitions and Zod schemas drive both runtime validation and generation, including concrete SDK agent, workspace, timeline and event outputs. `npm run openapi` also generates `build/openapi.json` for other-language client tooling. The application serves documentation describing its API contract independently of runtime configuration. Redoc, its assets and licenses are bundled in npm and standalone/container distributions and served locally.
 
-SSE has heartbeats, bounded lifetime/buffering/processing, authorization rechecks and subscription cleanup. Reconnect sends a fresh snapshot and resync, **not durable event replay**; refetch authorized activity to reconcile missing history. Browser clients must use fetch streaming with an Authorization header, never a token in a URL.
+SSE has heartbeats, bounded lifetime/buffering/processing, authorization rechecks and subscription cleanup. Reconnect sends a fresh snapshot and resync; refetch authorized activity to reconcile missing history. Browser clients use fetch streaming with an Authorization header.
 
 ## Administration and security
 
@@ -76,13 +75,13 @@ paseo-bridge --config /etc/paseo-bridge/bridge.json admin verify-host aspen
 # Verify durable configuration before manually deleting the temporary pair file.
 ```
 
-Import verifies Relay connectivity before persisting. It does **not** delete its input. Reload host configuration using `systemctl reload paseo-bridge`; listener changes require restart. Tokens can be scoped, issued, and revoked without exposing administrative operations through the API. `admin inspect-send HOST --agent ID` exposes only submission metadata. Clearing an unresolved send requires stopping the Bridge, matching its request ID and explicitly confirming reconciliation; see the deployment guide.
+Import verifies Relay connectivity before persisting and retains the input file. Reload host configuration using `systemctl reload paseo-bridge`; listener changes require restart. Tokens can be scoped, issued, and revoked through local administration. `admin inspect-send HOST --agent ID` exposes only submission metadata. Clearing an unresolved send requires stopping the Bridge, matching its request ID and explicitly confirming reconciliation; see the deployment guide.
 
 See [security and protocol](docs/security.md), [deployment/rollback](docs/deployment.md), and [agent usage](docs/agent-usage.md).
 
 ## Container runtime
 
-After the Node.js 22/24 checks pass on `main`, CI publishes an amd64 runtime image to `ghcr.io/fewensa/paseo-bridge:sha-<commit>`. Pin the resulting digest when deploying; private packages require a registry pull credential. The image runs as UID/GID 1000 and contains the bundled server and `paseo-bridge` CLI without runtime `node_modules`.
+After the Node.js 22/24 checks pass on `main`, CI publishes an amd64 runtime image to `ghcr.io/fewensa/paseo-bridge:sha-<commit>`. Pin the resulting digest when deploying; private packages require a registry pull credential. The image runs as UID/GID 1000 and contains the self-contained server and `paseo-bridge` CLI.
 
 Mount the server configuration at `/etc/paseo-bridge/bridge.json`, current-user-owned mode-600 credentials at its configured paths, and persistent storage at `/var/lib/paseo-bridge`. Use one replica with a stop-before-start rollout: submission guards are not cross-process locks. Keep central HTTP loopback-only and proxy it to authenticated HTTPS; never expose port 8787 directly. The chart opts into PID-1, private-container socket recovery at `/run/paseo-bridge/socket/bridge.sock`: only a current-user-owned stale socket with no listener is removed. Ordinary server/local startup still refuses any existing socket; never share this runtime with another writer.
 
@@ -101,4 +100,8 @@ node scripts/verify-package.mjs
 PASEO_TEST_LOCAL_CREDENTIAL=/absolute/path/to/local-credential npm test
 ```
 
-Tests exercise SDK WebSocket connections and official Relay E2EE channels, protected pairing import/persisted verification, daemon restart/reconnect, persistent identity, reload/shutdown races, Unix sockets, HTTPS trust, authentication/revocation/scopes, client-capacity isolation, pagination/partial failure, send busy/uncertain behavior and durable quarantine/reconciliation, CLI profiles, generated concrete OpenAPI, anonymous bundled documentation, SSE/poll deadlines, scopes/live revocation/stream cleanup and packaging. HTTPS tests use a generated local certificate and require `openssl`. Live ASPEN Relay acceptance and public HTTPS deployment need operator-supplied pairing files/domain; passing local tests does not assert those deployments have happened.
+Tests exercise SDK WebSocket connections and official Relay E2EE channels, protected pairing import/persisted verification, daemon restart/reconnect, persistent identity, reload/shutdown races, Unix sockets, HTTPS trust, authentication/revocation/scopes, client-capacity isolation, pagination/partial failure, send busy/uncertain behavior and durable quarantine/reconciliation, CLI profiles, generated concrete OpenAPI, anonymous bundled documentation, SSE/poll deadlines, scopes/live revocation/stream cleanup and packaging. HTTPS tests use a generated local certificate and require `openssl`.
+
+## License
+
+[MIT](LICENSE) © 2026 fewensa.
