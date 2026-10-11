@@ -1,6 +1,6 @@
 import type { Request } from '../service.js';
 import { BridgeError } from '../errors.js';
-import { apiError, jsonRequest, RESPONSE_LIMIT, type Transport } from './client-transport.js';
+import { apiError, jsonRequest, transportRequest, RESPONSE_LIMIT, type Transport } from './client-transport.js';
 import { EventParser, type SSEFrame } from './event-parser.js';
 import { snapshotData } from './models.js';
 
@@ -44,7 +44,7 @@ function stream(transport: Transport, path: string, signal: AbortSignal, lastId:
       if (error) reject(error); else resolve();
     };
     const watchdog = (ms: number) => { clearTimeout(timer); timer = setTimeout(() => finish(new BridgeError('CONNECTION', 'Observation stream stalled', 502)), ms); };
-    const req = transport.module.request({ ...transport.options, path: transport.prefix + path, method: 'GET', signal,
+    const req = transportRequest(transport, { ...transport.options, path: transport.prefix + path, method: 'GET', signal,
       headers: { ...transport.options.headers, accept: 'text/event-stream', ...(lastId ? { 'last-event-id': lastId } : {}) } }, res => {
       if (res.statusCode !== 200) {
         let size = 0; const chunks: Buffer[] = [];

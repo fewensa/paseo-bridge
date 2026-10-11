@@ -11,12 +11,19 @@ export const operations = ['status', 'agents', 'workspaces', 'send', 'activity',
 export type Operation = typeof operations[number];
 export const serverSchema = z.object({
   version: z.literal(1),
-  hosts: z.record(hostName, z.object({ connectionFile: path }).strict()).refine(x => Object.keys(x).length > 0),
+  hosts: z.record(hostName, z.object({ connectionFile: path }).strict()),
   socket: path,
   stateDir: path,
   requestTimeoutMs: z.number().int().min(100).max(120000).default(15000),
-  central: z.object({ port: z.number().int().min(1).max(65535), authFile: path }).strict().optional()
-}).strict();
+  central: z.object({ port: z.number().int().min(1).max(65535), authFile: path }).strict().optional(),
+  broker: z.object({ endpointClients: z.record(hostName, z.string().regex(/^[a-z][a-z0-9-]{0,62}$/)).refine(x => Object.keys(x).length > 0) }).strict().optional(),
+  endpoint: z.object({ host: hostName, url: z.string().url(), tokenFile: path, keyFile: path, peersFile: path, caFile: path.optional() }).strict().optional()
+}).strict().superRefine((x, ctx) => {
+  if (x.broker ? (!x.central || x.endpoint || Object.keys(x.hosts).length !== 0) : Object.keys(x.hosts).length === 0)
+    ctx.addIssue({ code: 'custom', message: 'Broker requires central listener and no daemon credentials; endpoints require hosts' });
+  if (x.endpoint && (Object.keys(x.hosts).length !== 1 || !(x.endpoint.host in x.hosts)))
+    ctx.addIssue({ code: 'custom', message: 'Endpoint must own exactly its local host' });
+});
 export type ServerConfig = z.infer<typeof serverSchema>;
 export const credentialSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('relay'), pairUrl: z.string(), password: z.string().optional() }).strict(),
@@ -30,7 +37,7 @@ export const clientSchema = z.object({
     z.object({ kind: z.literal('local'), socket: path }).strict(),
     z.object({ kind: z.literal('central'), url: z.string().url().refine(x => {
       const u = new URL(x); return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash;
-    }), tokenFile: path, caFile: path.optional() }).strict()
+    }), tokenFile: path, caFile: path.optional(), e2eeFile: path.optional() }).strict()
   ]))
 }).strict().refine(x => x.defaultProfile in x.profiles);
 export type ClientConfig = z.infer<typeof clientSchema>;

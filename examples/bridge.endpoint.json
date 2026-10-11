@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hosts": {
+    "aspen": {
+      "connectionFile": "/protected/aspen.connection.json"
+    }
+  },
+  "socket": "/run/paseo-bridge/bridge.sock",
+  "stateDir": "/var/lib/paseo-bridge",
+  "endpoint": {
+    "host": "aspen",
+    "url": "https://bridge.example.com",
+    "tokenFile": "/protected/central.token",
+    "keyFile": "/protected/e2ee.key",
+    "peersFile": "/protected/peers.json"
+  }
+}
