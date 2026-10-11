@@ -102,7 +102,7 @@ test('HTTPS client validates trust, uses tokens and CLI switches profiles', asyn
     await secret(peersFile, { [fingerprint(cp)]: { publicKey: cp.toString('base64'), operations: ['status'] } });
     const context = { v: 1 as const, host: 'birch', client: fingerprint(cp), id: randomUUID(), expires: Date.now() + 90000, op: 'status' as const };
     const replay = seal(channel, context, 'request', 0, { method: 'GET', path: '/api/v1/hosts/birch', body: '', lastEventId: '' });
-    await deliver(replay); const beforeReplay = localCalls; await deliver(replay);
+    const firstReplayCall = localCalls; await deliver(replay); assert.equal(localCalls, firstReplayCall + 1); const beforeReplay = localCalls; await deliver(replay);
     assert.equal(localCalls, beforeReplay, 'authenticated replay must never reach local API');
   } finally { await endpoint.stop(); broker.stop(); await closeServer(local); await closeServer(tls); await closeServer(handler); }
 });
