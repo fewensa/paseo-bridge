@@ -1,3 +1,4 @@
+import { nativeConfig, nativeCall } from '../native/client.js';
 import type { ClientConfig } from '../config.js';
 import type { Request } from '../service.js';
 import { BridgeError } from '../errors.js';
@@ -9,6 +10,8 @@ const results = { status: statusData, agents: agentsData, workspaces: workspaces
 export async function call(config: ClientConfig, profile: string | undefined, input: Request, options: { waitMode?: 'sse' | 'poll' } = {}): Promise<any> {
   const expiresAt = Date.now() + input.timeout * 1000;
   if (options.waitMode !== undefined && (input.op !== 'wait' || !['sse', 'poll'].includes(options.waitMode))) throw new BridgeError('USAGE', 'Wait mode is only valid with wait: sse or poll');
+  const native = await nativeConfig(config, profile);
+  if (native) return nativeCall(native, input, expiresAt);
   const transport = await clientTransport(config, profile);
   if (input.op === 'wait') return observe(transport, input, options.waitMode ?? 'sse', expiresAt);
   const host = encodeURIComponent(input.host);

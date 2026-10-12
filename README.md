@@ -1,15 +1,16 @@
 # Paseo Bridge
 
-A resident, multi-host bridge for agents using Paseo 0.11.1. Discover workspaces and agents, submit a prompt to an explicitly selected agent, read its timeline, and wait for it to finish. Connections and client identities persist across CLI calls and service restarts.
+A multi-host bridge for agents using Paseo 0.11.1. Discover workspaces and agents, submit a prompt to an explicitly selected agent, read its timeline, and wait for it to finish. Central clients connect on demand through the existing Paseo Relay, without a per-machine Bridge service.
 
 ## Two deployment modes, one CLI
 
 ```text
 Per-machine: CLI --profile local   → Unix socket → local Bridge → Paseo Relay → daemons
-Central:     CLI → E2EE over HTTPS → opaque central broker → E2EE over WSS → host endpoint → local daemon
+Central v2:  CLI → opaque HTTPS/WSS proxy → native encrypted Paseo Relay → daemon
+Legacy v1:   CLI → encrypted broker → host endpoint → local daemon
 ```
 
-Relay connections use the official Paseo SDK's E2EE implementation. Central mode uses pinned X25519 keys and AES-256-GCM between the CLI and the destination host's local endpoint; the central broker cannot decrypt messages or activity. Central bearer tokens and endpoint public-key grants constrain hosts and operations independently. Both CLIs require explicit pinned key configuration and never fall back to plaintext. See [central E2EE protocol and migration](docs/e2ee.md).
+Central v2 uses the native Paseo encrypted channel end to end. The center holds only host routing and bearer-token digests; daemon pairing capabilities stay in protected client files. It admits only fully trusted management grants and rejects **every operation-restricted token**, including query-only. Native Relay access grants owner permissions. Existing commands and token configuration stay the same; migration selects a version-2 file through the existing `e2eeFile`. See [native proxy setup and migration](docs/native-relay.md). Legacy v1 remains available during migration.
 
 ## Install
 
@@ -31,7 +32,7 @@ sudo ln -s /opt/paseo-bridge/paseo-bridge-server.mjs /usr/local/bin/paseo-bridge
 paseo-bridge --help
 ```
 
-Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.3.0.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24.
+Alternatively, `npm pack` creates an installable package with both commands; install with `npm install -g /path/to/paseo-bridge-0.4.0.tgz --ignore-scripts`. `node scripts/verify-package.mjs` checks both distribution methods after building/bundling. GitHub CI uploads bundled artifacts for Node 22 and 24.
 
 ## Use
 
@@ -59,7 +60,7 @@ Output is always JSON (`--json` is accepted). Queries return per-host results, t
 
 ## REST API and application-owned documentation
 
-The TypeScript CLI uses `/api/v1` REST routes over either Unix sockets or HTTPS. Sends use a dedicated messages POST; discovery, snapshots and activity use GET. SSE is recommended for ongoing observation, while ordinary snapshot/activity polling remains supported. See the [route and scope contract](docs/security.md#requestresponse-contract).
+In local and legacy v1 mode, the TypeScript CLI uses `/api/v1` REST routes over Unix sockets or HTTPS. In native v2 mode it maps commands to encrypted daemon RPC; the center rejects plaintext business REST with HTTP 426. Sends use a dedicated messages POST; discovery, snapshots and activity use GET. SSE is recommended for ongoing observation, while ordinary snapshot/activity polling remains supported. See the [route and scope contract](docs/security.md#requestresponse-contract).
 
 The service anonymously serves generated OpenAPI 3.1 at `/api/v1/openapi.json` and Redoc at `/api/v1/openapi`, with self-hosted script/license assets under `/api/v1/openapi/assets/`. Shared route definitions and Zod schemas drive both runtime validation and generation, including concrete SDK agent, workspace, timeline and event outputs. `npm run openapi` also generates `build/openapi.json` for other-language client tooling. The application serves documentation describing its API contract independently of runtime configuration. Redoc, its assets and licenses are bundled in npm and standalone/container distributions and served locally.
 
@@ -83,7 +84,7 @@ See [security and protocol](docs/security.md), [deployment/rollback](docs/deploy
 
 After the Node.js 22/24 checks pass on `main`, CI publishes an amd64 runtime image to `ghcr.io/fewensa/paseo-bridge:sha-<commit>`. Pin the resulting digest when deploying; private packages require a registry pull credential. The image runs as UID/GID 1000 and contains the self-contained server and `paseo-bridge` CLI.
 
-Mount the server configuration at `/etc/paseo-bridge/bridge.json`, current-user-owned mode-600 credentials at its configured paths, and persistent storage at `/var/lib/paseo-bridge`. Use one replica with a stop-before-start rollout: submission guards are not cross-process locks. Keep central HTTP loopback-only and proxy it to authenticated HTTPS; never expose port 8787 directly. The chart opts into PID-1, private-container socket recovery at `/run/paseo-bridge/socket/bridge.sock`: only a current-user-owned stale socket with no listener is removed. Ordinary server/local startup still refuses any existing socket; never share this runtime with another writer.
+Mount the server configuration at `/etc/paseo-bridge/bridge.json`, current-user-owned mode-600 credentials at its configured paths, and persistent storage at `/var/lib/paseo-bridge`. Use one replica with a stop-before-start rollout: preserve unresolved submission guards across upgrades. Keep central HTTP loopback-only and proxy it to authenticated HTTPS; never expose port 8787 directly. The chart opts into PID-1, private-container socket recovery at `/run/paseo-bridge/socket/bridge.sock`: only a current-user-owned stale socket with no listener is removed. Ordinary server/local startup still refuses any existing socket; never share this runtime with another writer.
 
 The `fes-de0` deployment is maintained in `repotea-workflow/gitops-fes`, under `charts/infra/paseo-bridge-helm` and `argocd/infra/paseo-bridge-de0`. Its chart documents Secret projection, credential ownership, persistent-state preservation, and stopped-service reconciliation.
 

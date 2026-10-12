@@ -51,3 +51,17 @@ test('local CLI clear requires explicit reconciliation and matching request ID',
   await assert.rejects(exec(process.execPath, args), (error: any) => error.code === 1 && JSON.parse(error.stderr).error.code === 'USAGE');
   const cleared = await exec(process.execPath, [...args, '--confirm-reconciled']); assert.equal(JSON.parse(cleared.stdout).reconciled, true);
 });
+
+test('separate CLI processes cannot overwrite an existing submission guard', async () => {
+  const dir = await directory();
+  const first = '4ec875f7-6da1-4c2e-a9e6-af175435d598';
+  const second = 'bd9eacb6-f001-46f2-80e4-ff71c264723b';
+  const a = new SubmissionGuards(dir); const b = new SubmissionGuards(dir);
+  const results = await Promise.allSettled([a.prepare('birch', 'agent-1', first), b.prepare('birch', 'agent-1', second)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(results.filter(r => r.status === 'rejected').length, 1);
+  const winner = results[0].status === 'fulfilled' ? first : second;
+  assert.equal((await a.inspect('birch', 'agent-1'))?.requestId, winner);
+  await assert.rejects(b.prepare('birch', 'agent-1', winner === first ? second : first), { code: 'SEND_UNCERTAIN' });
+  assert.equal((await a.inspect('birch', 'agent-1'))?.requestId, winner);
+});

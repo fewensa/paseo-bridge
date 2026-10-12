@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { join, dirname } from 'node:path';
 import { open, unlink, lstat } from 'node:fs/promises';
-import { atomicSecret, secretFile, hostName, type ServerConfig } from './config.js';
+import { durableDirectory, secretFile, hostName, type ServerConfig } from './config.js';
 import { BridgeError } from './errors.js';
 
 const agentId = z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/);
@@ -29,8 +29,25 @@ export class SubmissionGuards {
   async prepare(host: string, agent: string, requestId: string) {
     const record = recordSchema.parse({ version: 1, host, agent, requestId, createdAt: new Date().toISOString() });
     const file = this.file(host, agent);
-    if (file) await atomicSecret(file, JSON.stringify(record));
-    else this.memory.set(`${host}/${agent}`, record);
+    if (file) {
+      await durableDirectory(dirname(file));
+      let handle;
+      try { handle = await open(file, 'wx', 0o600); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+          throw new BridgeError('SEND_UNCERTAIN', 'Earlier submission outcome is unresolved; local operator reconciliation required', 409);
+        throw error;
+      }
+      // Never overwrite a guard from another CLI process. A failed write stays
+      // fail-closed for operator reconciliation instead of permitting dispatch.
+      try { await handle.writeFile(JSON.stringify(record)); await handle.sync(); }
+      finally { await handle.close(); }
+      const directory = await open(dirname(file), 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
+    } else {
+      await this.assertClear(host, agent);
+      this.memory.set(`${host}/${agent}`, record);
+    }
   }
   async clear(host: string, agent: string, requestId: string) {
     const record = await this.inspect(host, agent);
