@@ -82,12 +82,29 @@ test('official SDK uses opaque TLS proxy without daemon credential headers or a 
     const result = await nativeCall(config, requestSchema.parse({ op: 'agents', host: 'aspen' }));
     assert.equal(result.partial, false); assert.deepEqual(result.results[0].entries, []); assert.equal(queries, 1);
     assert(!wire.some(frame => frame.includes('synthetic-daemon-password') || frame.includes('fetch_agents_request')));
+    if (process.env.PASEO_NATIVE_GO_BIN) {
+      const response = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        const child = execFile(process.env.PASEO_NATIVE_GO_BIN!, ['agents', 'list-agents', '--host', 'aspen', '-o', 'json'], {
+        timeout: 15000, killSignal: 'SIGKILL',
+        env: { ...process.env, XDG_CONFIG_HOME: dir, XDG_CACHE_HOME: dir, SSL_CERT_FILE: certFile,
+          PASEO_BRIDGE_BASE_URL: `https://127.0.0.1:${(center.address() as { port: number }).port}`,
+          PASEO_BRIDGE_ACCESS_TOKEN: token, PASEO_BRIDGE_E2EE_FILE: pinsFile, PASEO_BRIDGE_CONTEXT: '', RSH_CACHE_DIR: dir + '/cache', RSH_CONFIG_DIR: dir + '/rsh' }
+        }, (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr }));
+        // Restish consumes piped stdin before issuing a request. End this
+        // synthetic input instead of leaving execFile's pipe open indefinitely.
+        child.stdin?.end();
+      });
+      const goResult = JSON.parse(response.stdout);
+      assert.equal(goResult.data.partial, false); assert.deepEqual(goResult.data.results[0].entries, []);
+      assert.equal(queries, 2);
+    }
+    const confirmedQueries = queries;
     config.pins.hosts.aspen.daemonPublicKeyB64 = exportPublicKey(generateKeyPair().publicKey);
     await assert.rejects(nativeCall(config, requestSchema.parse({ op: 'agents', host: 'aspen' })));
-    assert.equal(queries, 1);
+    assert.equal(queries, confirmedQueries);
     config.pins.hosts.aspen.serverId = 'unexpected-server';
-    await assert.rejects(nativeCall(config, requestSchema.parse({ op: 'agents', host: 'aspen' })), { code: 'E2EE_CONFIG' }); assert.equal(queries, 1);
+    await assert.rejects(nativeCall(config, requestSchema.parse({ op: 'agents', host: 'aspen' })), { code: 'E2EE_CONFIG' }); assert.equal(queries, confirmedQueries);
   } finally {
-    proxy.stop(); for (const c of relay.clients) c.terminate(); await closeServer(center); await new Promise<void>(r => relay.close(() => r())); await closeServer(upstream);
+    proxy.stop(); for (const c of relay.clients) c.terminate(); center.closeAllConnections(); upstream.closeAllConnections(); await closeServer(center); await new Promise<void>(r => relay.close(() => r())); await closeServer(upstream);
   }
 });
