@@ -9,6 +9,10 @@ const path = z.string().refine(isAbsolute, 'Absolute path required');
 export const hostName = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/).refine(x => x !== 'all');
 export const operations = ['status', 'agents', 'workspaces', 'send', 'activity', 'wait'] as const;
 export type Operation = typeof operations[number];
+export const nativePublicKeySchema = z.string().refine(v => { const b = Buffer.from(v, 'base64'); return b.length === 32 && b.toString('base64') === v; });
+export const nativeHostSchema = z.object({ serverId: z.string().min(1).max(256), url: z.string().url().refine(v => { const u = new URL(v); return u.protocol === 'wss:' && !u.username && !u.password && !u.hash && u.pathname === '/ws' &&
+  [...u.searchParams.keys()].every(k => ['role', 'serverId', 'v'].includes(k) && u.searchParams.getAll(k).length === 1) &&
+  (!u.searchParams.has('v') || u.searchParams.get('v') === '2'); }) }).strict();
 export const serverSchema = z.object({
   version: z.literal(1),
   hosts: z.record(hostName, z.object({ connectionFile: path }).strict()),
@@ -16,11 +20,15 @@ export const serverSchema = z.object({
   stateDir: path,
   requestTimeoutMs: z.number().int().min(100).max(120000).default(15000),
   central: z.object({ port: z.number().int().min(1).max(65535), authFile: path }).strict().optional(),
+  nativeRelay: z.object({ hosts: z.record(hostName, nativeHostSchema).refine(v => Object.keys(v).length > 0) }).strict().optional(),
   broker: z.object({ endpointClients: z.record(hostName, z.string().regex(/^[a-z][a-z0-9-]{0,62}$/)).refine(x => Object.keys(x).length > 0) }).strict().optional(),
   endpoint: z.object({ host: hostName, url: z.string().url(), tokenFile: path, keyFile: path, peersFile: path, caFile: path.optional() }).strict().optional()
 }).strict().superRefine((x, ctx) => {
-  if (x.broker ? (!x.central || x.endpoint || Object.keys(x.hosts).length !== 0) : Object.keys(x.hosts).length === 0)
+  if (x.nativeRelay && (!x.central || x.broker || x.endpoint || Object.keys(x.hosts).length !== 0))
+    ctx.addIssue({ code: 'custom', message: 'Native proxy requires central listener and no daemon connections or endpoints' });
+  if (!x.nativeRelay && (x.broker ? (!x.central || x.endpoint || Object.keys(x.hosts).length !== 0) : Object.keys(x.hosts).length === 0))
     ctx.addIssue({ code: 'custom', message: 'Broker requires central listener and no daemon credentials; endpoints require hosts' });
+  if (x.nativeRelay) for (const route of Object.values(x.nativeRelay.hosts)) { const u = new URL(route.url); if (u.searchParams.get('role') !== 'client' || u.searchParams.get('serverId') !== route.serverId) ctx.addIssue({ code: 'custom', message: 'Native upstream must match its pinned server ID and client role' }); }
   if (x.endpoint && (Object.keys(x.hosts).length !== 1 || !(x.endpoint.host in x.hosts)))
     ctx.addIssue({ code: 'custom', message: 'Endpoint must own exactly its local host' });
 });
