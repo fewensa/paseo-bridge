@@ -65,7 +65,10 @@ test('official SDK uses opaque TLS proxy without daemon credential headers or a 
   const token = randomBytes(32).toString('base64url'); const auth = join(dir, 'auth'); await secret(auth, { version: 1, clients: { owner: { digest: digest(token), hosts: ['aspen'], operations } } });
   // Trust only this test certificate for the upstream, never disable TLS validation.
   const proxy = nativeProxyServer({ authFile: auth, hosts: { aspen: { serverId: 'native-test', url: `wss://127.0.0.1:${(upstream.address() as { port: number }).port}/ws?role=client&serverId=native-test` } } }, url => new WebSocket(url, { ca: tls.cert, maxPayload: 4 * 1024 * 1024, perMessageDeflate: false }));
-  const center = createServer(tls); center.on('request', (req, res) => proxy.server.emit('request', req, res)); center.on('upgrade', (req, socket, head) => proxy.server.emit('upgrade', req, socket, head));
+  const center = createServer(tls); center.on('request', (req, res) => {
+    if (req.url === '/api/v1/native/hosts') assert.equal(req.headers['user-agent'], 'paseo-bridge/native-relay');
+    proxy.server.emit('request', req, res);
+  }); center.on('upgrade', (req, socket, head) => proxy.server.emit('upgrade', req, socket, head));
   await listen(center, 0, '127.0.0.1');
   await secret(join(dir, 'token'), token); await secret(join(dir, 'password'), 'synthetic-daemon-password');
   const pinsFile = join(dir, 'pins.json'); await secret(pinsFile, { version: 2, stateDir: dir, hosts: { aspen: { serverId: 'native-test', daemonPublicKeyB64: pub, passwordFile: join(dir, 'password') } } });
