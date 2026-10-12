@@ -35,7 +35,7 @@ export async function nativeCall(config: NonNullable<Awaited<ReturnType<typeof n
   const token = await secretFile(selected.tokenFile);
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new BridgeError('TOKEN', 'Invalid client token');
   const ca = selected.caFile ? await readFile(selected.caFile) : undefined;
-  const transport: Transport = { module: https, prefix: base.pathname.replace(/\/$/, ''), options: { hostname: base.hostname, port: base.port || 443, rejectUnauthorized: true, headers: { authorization: `Bearer ${token}` }, ...(ca ? { ca } : {}) } };
+  const transport: Transport = { module: https, prefix: base.pathname.replace(/\/$/, ''), options: { hostname: base.hostname, port: base.port || 443, rejectUnauthorized: true, headers: { authorization: `Bearer ${token}`, 'user-agent': 'paseo-bridge/native-relay' }, ...(ca ? { ca } : {}) } };
   const directory = directorySchema.parse(await jsonRequest(transport, '/api/v1/native/hosts', { timeoutMs: Math.min(15000, remaining()) }));
   const targets = input.host === 'all' ? Object.keys(pins.hosts) : [input.host];
   const hosts = new Map<string, Connection>();
@@ -53,7 +53,7 @@ export async function nativeCall(config: NonNullable<Awaited<ReturnType<typeof n
         connectTimeoutMs: Math.min(10000, remaining()), reconnect: { enabled: false },
         // Override SDK compatibility password headers/subprotocols: only the Bridge token
         // reaches the center. Daemon credentials travel in the encrypted hello exclusively.
-        webSocketFactory: address => new WebSocket(address, { headers: { authorization: `Bearer ${token}` },
+        webSocketFactory: address => new WebSocket(address, { headers: { authorization: `Bearer ${token}`, 'user-agent': 'paseo-bridge/native-relay' },
           ...(ca ? { ca } : {}), maxPayload: 4 * 1024 * 1024, perMessageDeflate: false, handshakeTimeout: 10000 }) as unknown as WebSocketLike });
       hosts.set(host, { api: createPaseoApi(driver), state: () => driver.getConnectionState().status,
         start: async () => { try { await deadline(driver.connect(), Math.min(12000, remaining())); }
